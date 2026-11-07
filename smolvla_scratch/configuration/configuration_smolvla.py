@@ -25,6 +25,7 @@ class SmolVLAConfig:
     )
 
     output_features: dict = field(
+        default_factory=lambda: {
             "action": {
                 "shape": (ROBOT_STATE,),
                 "type": "ACTION",
