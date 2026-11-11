@@ -21,6 +21,14 @@ class SmolVLAConfig:
             "observation.state": {
                 "shape": (ROBOT_STATE,),
                 "type": "STATE",
+            },
+            "observation.images.front": {
+                "shape": (3, 480, 640),
+                "type": "VISUAL"
+            },
+            "observation.images.wrist": {
+                "shape": (3, 480, 640),
+                "type": "VISUAL"
             }
         }
     )
