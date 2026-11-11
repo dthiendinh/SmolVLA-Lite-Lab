@@ -2,6 +2,7 @@ from torch.optim.lr_scheduler import LambdaLR
 import math
 from dataclasses import dataclass
 import logging
+from torch.optim import Optimizer
 
 
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from .optimizers import AdamWConfig
 from .schedulers import CosineDecayWithWarmupSchedulerConfig
 from low_control.hardware_constant import ROBOT_STATE
+from .rtc_processor import RTCConfig
 
 @dataclass
 class SmolVLAConfig:
