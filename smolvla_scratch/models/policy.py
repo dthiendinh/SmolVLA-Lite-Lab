@@ -89,9 +89,9 @@ class SmolVLAPolicy(nn.Module):
         present_img_keys = [key for key in self.image_keys if key in batch]
         missing_img_keys = [key for key in self.image_keys if key not in batch]
 
-        if len(present_img_keys) == 0:
+        if not present_img_keys:
             raise ValueError(
-                f"All image features are missing from the batch. At least one expected. (batch: {batch.keys()}) (image_features:{self.config.image_features})"
+                f"No configured camera found. Expected one of: {self.image_keys}"
             )
         # Preprocess image features present in the batch
         for key in present_img_keys:

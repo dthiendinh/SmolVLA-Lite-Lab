@@ -17,7 +17,7 @@
 Chi tiết tải VLM, tạo expert, attention và embedding nằm ở bốn module riêng.
 """
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import functional as F
 from transformers import DynamicCache
 
@@ -32,7 +32,11 @@ from ..utils.vla_utils import (
     create_sinusoidal_pos_embedding,
     make_att_2d_masks,
 )
-from .rtc_processor import RTCProcessor
+from .rtc_processor import RTCProcessor, RTCActionSelectKwargs
+from ..configuration.configuration_smolvla import SmolVLAConfig
+import math
+from typing import Unpack
+
 
 def positions(pad):
     """Vị trí token; padding không tăng chỉ số."""
@@ -182,6 +186,9 @@ class SmolVLMWithExpertModel(nn.Module):
         head_dim = self.vlm.config.text_config.head_dim
         # Run each global transformer layer
         for layer_idx in range(num_layers):
+            if (inputs_embeds[0] is None and model_layers[1][layer_idx] is None):
+                continue
+
             if (
                 fill_kv_cache
                 or inputs_embeds[1] is None

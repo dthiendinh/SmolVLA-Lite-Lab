@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from .optimizers import AdamWConfig
 from .schedulers import CosineDecayWithWarmupSchedulerConfig
 from low_control.hardware_constant import ROBOT_STATE
-from .rtc_processor import RTCConfig
+from ..models.rtc_processor import RTCConfig
 
 @dataclass
 class SmolVLAConfig:
@@ -69,7 +69,9 @@ class SmolVLAConfig:
     # 6. Training
     freeze_vision_encoder: bool = True
     train_expert_only: bool = True
+    train_state_proj: bool = True
     learning_rate: float = 1e-4
+    device : str | None = None
 
     # 7. Normalization
     normalization_mapping: dict[str, str] = field(
@@ -94,8 +96,9 @@ class SmolVLAConfig:
     scheduler_decay_lr: float = 2.5e-6
 
     # 10. Model Config
+    # TODO: Change the bool value here 
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"  # Select the VLM backbone.
-    load_vlm_weights: bool = False  # Set to False in case of training the expert from scratch. True when init from pretrained SmolVLA weights
+    load_vlm_weights: bool = True  # Set to False in case of training the expert from scratch. True when init from pretrained SmolVLA weights
 
     add_image_special_tokens: bool = False  # Whether to use special image tokens around image features.
 
@@ -138,6 +141,13 @@ class SmolVLAConfig:
 
         if self.max_action_dim <= 0:
             raise ValueError("max_action_dim must be positive")
+        
+        if (
+            not isinstance(self.num_steps, int)
+            or isinstance(self.num_steps, bool)
+            or self.num_steps <= 0
+        ):
+            raise ValueError("num_steps must be a positive integer")
 
     def get_optimizer_preset(self):
         return AdamWConfig(

@@ -56,7 +56,7 @@ class SmolVLAProcessor():
 
         # Use the tokenizer belonging to the VLM backbone
         if tokenizer is None: 
-            from transformers import AutoTokenzier
+            from transformers import AutoTokenizer
 
             tokenizer = AutoTokenizer.from_pretrained(config.vlm_model_name)
         
@@ -71,7 +71,7 @@ class SmolVLAProcessor():
 
         action_feature = config.output_features["action"]
 
-        self.action_dim = (int(action_feature.shape[0]) if action_feature is not None else None)
+        self.action_dim = (int(action_feature["shape"][0]) if action_feature is not None else None)
 
     def _mode(self, feature_type: str) -> str:
         """Find normalization mode for STATE/ACTION/VISUAL."""

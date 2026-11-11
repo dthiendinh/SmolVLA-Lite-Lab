@@ -8,6 +8,8 @@ from collections import deque
 
 import torch
 from torch.nn import functional as F
+from typing import TypedDict
+from torch import Tensor
 
 # TODO: Có thể thay đổi processor sau này cho inference 
 
@@ -16,6 +18,13 @@ class RTCAttentionSchedule(str, Enum):
     ONES = "ONES"
     LINEAR = "LINEAR"
     EXP = "EXP"
+
+class RTCActionSelectKwargs(TypedDict, total=False):
+    """Keyword arguments Real-Time Chunking passes to `predict_action_chunk`."""
+
+    inference_delay: int | None
+    prev_chunk_left_over: Tensor | None
+    execution_horizon: int | None
 
 @dataclass
 class RTCConfig:
@@ -56,6 +65,8 @@ class RTCConfig:
 
 class RTCProcessor:
     def __init__(self, rtc_config: RTCConfig):
+        if rtc_config.enabled and rtc_config.mode != "guided":
+            raise ValueError("This policy supports guided RTC only")
         self.rtc_config = rtc_config
         self._steps = deque(maxlen=rtc_config.debug_maxlen)
 
@@ -121,6 +132,8 @@ class RTCProcessor:
             lin_weights = lin_weights * torch.expm1(lin_weights).div(math.e - 1)
             weights = self._add_trailing_zeros(lin_weights, total, end)
             weights = self._add_leading_ones(weights, start, total)
+        
+        return weights
 
     def denoise_step(self, x_t, prev_chunk_left_over, inference_delay, time,
                      original_denoise_step_partial, execution_horizon=None):
