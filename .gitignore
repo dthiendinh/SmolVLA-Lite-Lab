@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.py[cod]
+outputs/
+data_recording/data/
+data_recording/follower_state.json
+data_recording/follower_state.tmp

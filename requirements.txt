@@ -1,7 +1,12 @@
-# Python 3.12; core versions used by the offline integration checks.
+# Python 3.12. Direct project dependencies; pip resolves their dependencies.
 torch==2.11.0
 transformers==5.22.2
-numpy>=2.0,<3.0
+lerobot[feetech]==0.6.2
+numpy>=2.0,<2.3
+# LeRobot also requests headless OpenCV; see README for the GUI cleanup step.
 opencv-python>=4.10,<4.14
 tqdm>=4.66,<5.0
+matplotlib>=3.10.3,<4.0
 dm-env==1.6
+# Required internally by SmolVLMProcessor.
+num2words>=0.5.14,<0.6

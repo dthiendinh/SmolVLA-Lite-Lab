@@ -4,31 +4,57 @@ SmolVLA tự triển khai: thu dữ liệu SO-ARM101 → train action expert tr�
 
 ## Môi trường
 
-Dùng Python 3.12 trong môi trường riêng. Từ thư mục gốc repo:
+Dùng Python 3.12 và virtual env riêng. Từ thư mục gốc repo:
 
 ```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
+```
+
+`requirements.txt` chỉ liệt kê các dependency trực tiếp của dự án và `num2words` mà SmolVLM processor bắt buộc cần. `lerobot[feetech]` tự cài các dependency robot; không cần liệt kê lại chúng. `matplotlib` dùng cho biểu đồ loss và có thể bỏ nếu không cần biểu đồ.
+
+Nếu `.venv` là env từng được tạo bằng script cũ, bỏ file liên kết source cũ trước khi dùng bản LeRobot cài bằng pip:
+
+```bash
+rm -f .venv/lib/python3.12/site-packages/smolvla_local_sources.pth
+```
+
+**Dashboard OpenCV:** LeRobot 0.6.2 khai báo `opencv-python-headless`, còn dashboard dùng `cv2.imshow` cần `opencv-python`. Hai gói dùng chung tên `cv2`; [OpenCV hướng dẫn chỉ giữ một biến thể](https://pypi.org/project/opencv-python/). Sau khi cài requirements, nếu cả hai gói cùng có mặt, chạy:
+
+```bash
+python -m pip uninstall -y opencv-python opencv-python-headless
+python -m pip install 'opencv-python>=4.10,<4.14'
+```
+
+Đây là cách thay bản headless bằng bản có GUI cho dashboard. Sau đó `pip check` có thể báo LeRobot thiếu `opencv-python-headless` theo metadata của nó, dù `cv2` có GUI đã có mặt. Mỗi lần cài lại LeRobot/requirements cần kiểm tra lại điểm này; file requirements thuần không tự thực hiện bước thay thế gói.
+
+Mỗi lần mở terminal mới:
+
+```bash
+cd /Users/tt/Documents/GitHub/SmolVLA-Lite-Lab
+source .venv/bin/activate
 python -B -m smolvla_scratch.train_infer --help
 ```
 
-Thu dữ liệu và rollout cần thêm LeRobot với hỗ trợ Feetech. Nếu checkout LeRobot nằm cạnh repo này:
+Kiểm tra Python và LeRobot đang dùng bằng:
 
 ```bash
-python -m pip install -e '../lerobot[feetech]'
-python -c 'import transformers, cv2, dm_env, lerobot; print(lerobot.__file__)'
+python -c 'import sys, lerobot; print(sys.executable); print(lerobot.__file__)'
 ```
 
-Kiểm tra đường dẫn in ra đúng checkout muốn dùng. Môi trường có sẵn trên máy khi audit import LeRobot từ `/Users/tt/lerobot`, còn checkout đang xem là `/Users/tt/Documents/GitHub/lerobot`.
+LeRobot cài bằng pip phải được import từ `.venv/.../site-packages/lerobot`. Thoát env bằng `deactivate`. `.venv/`, dữ liệu thu và outputs được bỏ qua trong Git.
 
-Dashboard cần OpenCV có GUI. Kiểm tra dòng `GUI` bằng `python -c 'import cv2; print(cv2.getBuildInformation())'`; nếu là `NONE`, thay bản OpenCV headless bằng bản có GUI trong môi trường dùng để thu dữ liệu. Các bản OpenCV dùng chung tên import `cv2`, nên cần kiểm tra sau khi cài LeRobot.
-
-## Kiểm tra không cần robot hoặc tải weights
+## Kiểm tra môi trường không cần robot hoặc tải weights
 
 ```bash
-HF_HUB_OFFLINE=1 python -B -m unittest discover -s tests -v
+python -m pip check
+python -B -m smolvla_scratch.train_infer --help
+python -B -m data_recording.record_teleop_data --help
+python -c 'import dm_env; from low_control.low_level_control import RealEnv; print("Rollout imports OK")'
 ```
 
-Test dùng các layer Transformers thật với model nhỏ ngẫu nhiên, dữ liệu NPZ/MP4 thật và môi trường robot giả. Test recorder cần cài LeRobot; nếu thiếu sẽ báo skip. Test này xác minh luồng chương trình, không đo chất lượng gắp vật hoặc tốc độ model 500M.
+Các lệnh này kiểm tra dependency và import của ba luồng, không kết nối phần cứng hoặc đo chất lượng policy. Kết quả audit model trước đây nằm trong `docs/AUDIT_VI.md`.
 
 ## Thu dữ liệu
 
