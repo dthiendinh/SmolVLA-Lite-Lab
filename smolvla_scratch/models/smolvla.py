@@ -613,31 +613,44 @@ class VLAFlowMatching(nn.Module):
             noise = self.sample_noise(actions_shape, device)
         else:
             noise = noise.to(device=device, dtype=torch.float32)
+        if noise.shape != (bsize, self.config.chunk_size, self.config.max_action_dim):
+            raise ValueError("Noise shape differs from configured batch/chunk/action dimensions")
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks, state=state
         )
-        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-        # Compute image and language key value cache
-        _, past_key_values = self.vlm_with_expert.forward(
-            attention_mask=prefix_att_2d_masks,
-            position_ids=prefix_position_ids,
-            past_key_values=None,
-            inputs_embeds=[prefix_embs, None],
-            use_cache=self.config.use_cache,
-        )
-        num_steps = self.config.num_steps
+        if self.config.use_cache:
+            prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+            prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+            # Compute image, language and state key/value cache once.
+            _, past_key_values = self.vlm_with_expert.forward(
+                attention_mask=prefix_att_2d_masks,
+                position_ids=prefix_position_ids,
+                past_key_values=None,
+                inputs_embeds=[prefix_embs, None],
+                use_cache=True,
+            )
+
+            def velocity(x_t, timestep):
+                return self.denoise_step(prefix_pad_masks, past_key_values, x_t, timestep)
+        else:
+            # Without a cache every step must receive the full prefix again.
+            def velocity(x_t, timestep):
+                suffix, suffix_pad, suffix_att = self.embed_suffix(x_t, timestep)
+                pad = torch.cat([prefix_pad_masks, suffix_pad], dim=1)
+                boundary = torch.cat([prefix_att_masks, suffix_att], dim=1)
+                (_, suffix_out), _ = self.vlm_with_expert.forward(
+                    attention_mask=make_att_2d_masks(pad, boundary),
+                    position_ids=positions(pad),
+                    inputs_embeds=[prefix_embs, suffix],
+                    use_cache=False,
+                )
+                return self.action_out_proj(suffix_out[:, -self.config.chunk_size:].float())
 
         return euler_integrate(
-            lambda input_x_t, current_timestep: self.denoise_step(
-                x_t=input_x_t,
-                prefix_pad_masks=prefix_pad_masks,
-                past_key_values=past_key_values,
-                timestep=current_timestep,
-            ),
+            velocity,
             noise,
-            num_steps,
+            self.config.num_steps,
             rtc_processor=self.rtc_processor,
             rtc_enabled=self._rtc_enabled(),
             inference_delay=kwargs.get("inference_delay"),
@@ -666,17 +679,17 @@ class VLAFlowMatching(nn.Module):
         prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
         position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
 
-        outputs_embeds, _ = self.vlm_with_expert.forward(
-            attention_mask=full_att_2d_masks,
-            position_ids=position_ids,
-            past_key_values=past_key_values,
-            inputs_embeds=[None, suffix_embs],
-            use_cache=self.config.use_cache,
-        )
-        if past_key_values is not None:
-            # Self-attention layers append suffix K/V in place; restore the prefix for the next step.
-            for layer in past_key_values.layers:
-                layer.crop(prefix_len - layer.get_seq_length())
+        try:
+            outputs_embeds, _ = self.vlm_with_expert.forward(
+                attention_mask=full_att_2d_masks,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=[None, suffix_embs],
+                use_cache=self.config.use_cache,
+            )
+        finally:
+            if past_key_values is not None:
+                crop_prefix_cache(past_key_values, prefix_len)
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.chunk_size :]
         suffix_out = suffix_out.to(dtype=torch.float32)
