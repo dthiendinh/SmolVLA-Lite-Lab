@@ -436,7 +436,7 @@ def main(argv=None):
     # Model config
     policy_config = SmolVLAConfig(
         device=args.device, chunk_size=args.chunk_size, n_action_steps=args.n_action_steps,
-        num_steps=args.num_steps, vlm_model_name=args.vlm_model_name,
+        num_steps=args.num_euler_steps, vlm_model_name=args.vlm_model_name,
         optimizer_lr=args.lr, learning_rate=args.lr,
         input_features={STATE: {"shape": (len(JOINT_NAMES),), "type": "STATE"}, **{
             f"observation.images.{camera}": {"shape": shape, "type": "VISUAL"}

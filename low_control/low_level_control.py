@@ -14,16 +14,6 @@ RESET_POSE = RESET_POSE
 DT = CONTROL_DT
 MAX_RELATIVE_TARGET = 5.0  # Per-command bound in LeRobot joint units (gripper uses its own scale).
 CAMERAS = CAMERA_CONFIGS
-#TODO:
-TASK_CONFIGS = {
-    "so101_pick_place": {
-        "dataset_dir": "/workspace/pick_place_act",
-        "num_episodes": 13,  # Set to your approved, consecutively numbered count.
-        "episode_len": 1000,  # Evaluation steps; does not truncate training data.
-        "camera_names": ["wrist", "front"],
-        "state_dim": 6,
-    },
-}
 
 def disconnect_arm(arm):
     # SOFollower.is_connected is False if even one camera failed to connect.

@@ -30,11 +30,10 @@ def set_seed(seed):
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--eval", action="store_true", help="Offline validation + sampled action error")
-    mode.add_argument("--rollout", action="store_true", help="Run an explicitly supplied environment")
+
+    # Train
     parser.add_argument("--dataset_dir")
     parser.add_argument("--ckpt_dir")
-    parser.add_argument("--checkpoint", help="Checkpoint created by this script; required for eval/rollout")
     parser.add_argument("--task", help="Language instruction; one task for all training episodes")
     parser.add_argument("--camera_names", nargs="+", default=["front", "wrist"])
     parser.add_argument("--num_episodes", type=int)
@@ -47,14 +46,21 @@ def build_parser():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--chunk_size", type=int, default=50)
     parser.add_argument("--n_action_steps", type=int, help="Default: chunk_size")
-    parser.add_argument("--num_steps", type=int, default=10, help="Euler denoising steps at inference")
+    parser.add_argument("--num_euler_steps", type=int, default=10, help="Euler denoising steps at inference")
     parser.add_argument("--save_every", type=int, default=10)
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
     parser.add_argument("--vlm_model_name", default="HuggingFaceTB/SmolVLM2-500M-Video-Instruct")
-    parser.add_argument("--env_factory", help="Optional custom factory; default low_control.low_level_control:make_real_env")
-    parser.add_argument("--env_kwargs", help="JSON file containing environment factory keyword arguments")
+
+    # Eval 
+    mode.add_argument("--eval", action="store_true", help="Offline validation + sampled action error")
+    mode.add_argument("--rollout", action="store_true", help="Run an explicitly supplied environment")
     parser.add_argument("--episode_len", type=int, default=1000)
     parser.add_argument("--num_rollouts", type=int, default=1)
+    parser.add_argument("--checkpoint", help="Checkpoint created by this script; required for eval/rollout")
+    # Dont need
+    parser.add_argument("--env_factory", help="Optional custom factory; default low_control.low_level_control:make_real_env")
+    parser.add_argument("--env_kwargs", help="JSON file containing environment factory keyword arguments")
+    
     return parser
 
 def make_policy(config):
