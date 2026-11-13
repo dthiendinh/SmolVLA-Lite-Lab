@@ -17,6 +17,7 @@ passing the same one to both remains the caller's responsibility.
 """
 
 import enum
+import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
@@ -62,6 +63,8 @@ def _beta_distribution(alpha: float, beta: float) -> "torch.distributions.Beta":
     built with an explicit ``device="cpu"`` rather than the ambient default device, so a
     call inside a ``torch.device(...)`` context still samples on CPU.
     """
+    if not math.isfinite(alpha) or not math.isfinite(beta) or alpha <= 0 or beta <= 0:
+        raise ValueError("alpha and beta must be finite and positive")
     alpha_t = torch.tensor(alpha, device="cpu", dtype=torch.float32)
     beta_t = torch.tensor(beta, device="cpu", dtype=torch.float32)
     return torch.distributions.Beta(alpha_t, beta_t, validate_args=False)
@@ -90,6 +93,8 @@ def sample_beta(
         sampler: Optional hook replacing the CPU distribution, for callers that must
             preserve a different RNG stream (see ``device_beta_sampler``).
     """
+    if isinstance(bsize, bool) or not isinstance(bsize, int) or bsize < 0:
+        raise ValueError("bsize must be a nonnegative integer")
     if sampler is not None:
         raw = sampler(alpha, beta, bsize)
     else:
@@ -185,6 +190,16 @@ def make_flow_matching_inputs(
     """
     if not isinstance(convention, FlowConvention):
         raise TypeError(f"convention must be a FlowConvention, got {convention!r}")
+    if actions.ndim != 3:
+        raise ValueError("actions must have shape [batch, horizon, action_dim]")
+    try:
+        broadcast_shape = torch.broadcast_shapes(actions.shape, noise.shape)
+    except RuntimeError as exc:
+        raise ValueError("noise must be broadcastable to the action shape") from exc
+    if broadcast_shape != actions.shape:
+        raise ValueError("noise must not expand the action shape")
+    if actions.device != noise.device or actions.device != time.device:
+        raise ValueError("actions, noise and time must share a device")
     if time.shape != actions.shape[:1]:
         raise ValueError(f"time must have shape (batch,), got {tuple(time.shape)}")
     if prefix_mask is not None and prefix_mask.shape != actions.shape[:2]:
@@ -290,6 +305,8 @@ def euler_integrate(
         num_steps = time_grid.shape[0] - 1
     elif num_steps is None:
         raise ValueError("euler_integrate requires either num_steps or time_grid")
+    if isinstance(num_steps, bool) or not isinstance(num_steps, int) or num_steps <= 0:
+        raise ValueError("num_steps must be a positive integer")
 
     # Clean tokens sit at the far end of the schedule from the noise.
     clean_time = 0.0 if noise_at_one else 1.0
@@ -365,6 +382,8 @@ def euler_integrate(
         else:
             v_t = denoise_step_partial_call(x_t)
 
+        if v_t.shape != x_t.shape or v_t.dtype != x_t.dtype or v_t.device != x_t.device:
+            raise ValueError("denoise_fn must return the same shape, dtype and device as x_t")
         update = dt * v_t
         if velocity_scale is not None:
             update = update * velocity_scale
