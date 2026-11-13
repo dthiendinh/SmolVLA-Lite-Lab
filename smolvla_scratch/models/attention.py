@@ -34,6 +34,7 @@ def block_mask(pad, boundaries):
 
 
 class AttentionEngine:
+    # TODO: Change to English
     """Chỉ thực thi phép toán; Q/K/V/o_proj vẫn thuộc VLM và expert.
 
     Không phải nn.Module vì không có parameter/buffer hay trạng thái train/eval.
@@ -76,7 +77,7 @@ class AttentionEngine:
             query_state = layer.self_attn.q_proj(hidden_states).view(hidden_shape) # [B, L, Hq, head_dim]
             key_state = layer.self_attn.k_proj(hidden_states).view(hidden_shape) # [B, L, Hkv, head_dim]
             value_state = layer.self_attn.v_proj(hidden_states).view(hidden_shape) # [B, L, Hkv, head_dim]
-
+ 
             query_states.append(query_state)
             key_states.append(key_state)
             value_states.append(value_state)

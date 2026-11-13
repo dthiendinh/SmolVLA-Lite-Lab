@@ -31,6 +31,7 @@ def get_intermediate_size(hidden_dim, ffn_dim_multiplier=4, multiple_of=256):
 def build_action_expert(text_config, num_vlm_layers, *, num_expert_layers=-1,
                         expert_width_multiplier=0.75, attention_mode="cross_attn",
                         self_attn_every_n_layers=2):
+    # TODO: Change to English
     """Expert mới từ text config; VLM weights được quản lý ở backbone.py."""
     if attention_mode not in {"self_attn", "cross_attn"} or expert_width_multiplier <= 0:
         raise ValueError("Invalid attention_mode or expert_width_multiplier")

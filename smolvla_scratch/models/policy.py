@@ -160,6 +160,7 @@ class SmolVLAPolicy(nn.Module):
 
         images, img_masks = self.prepare_images(batch)
         state = self.prepare_state(batch)
+        # TODO: Be careful Check what is the batch here
         lang_tokens = batch[TOKENS]
         lang_masks = batch[LANG_MASK]
         actions = self.prepare_action(batch)

@@ -7,6 +7,8 @@ _to_device() (transform to CPU/GPU) ->
 _transform (Normalize state and action)
 """
 
+# TODO: Check why this file will not be used
+
 from typing import Any 
 import torch 
 
@@ -94,6 +96,7 @@ class SmolVLAProcessor():
 
 
     # Data Processing
+    # TODO: DATA_PRE_PROCESSING
     def _rename(self, data: dict) -> dict:
         """
         Rename configured keys, including padding metadata.
@@ -149,6 +152,7 @@ class SmolVLAProcessor():
         # Find the types of cameras
         image_keys = [
             key for key in batch
+            # TODO: Be careful here
             if (key == "observation.image" or key.startswith(IMAGE_PREFIX)) and not key.endswith(("_padding_mask", "_is_pad"))
         ]
 
@@ -252,6 +256,8 @@ class SmolVLAProcessor():
         Training action, if present, is also normalized.
         """
 
+        # TODO: Check what is the batch here
+        
         # Validate the raw observation
         # Rename the data
         batch = self._rename(data)

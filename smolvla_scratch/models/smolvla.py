@@ -98,6 +98,7 @@ class SmolVLMWithExpertModel(nn.Module):
         )
         self.num_expert_layers = len(self.lm_expert.layers)
         self.expert_hidden_size = self.lm_expert.config.hidden_size
+        # TODO: Check text_config here
         self.num_attention_heads = self.config.text_config.num_attention_heads
         self.num_key_value_heads = self.config.text_config.num_key_value_heads
         self.attention = AttentionEngine(self.num_attention_heads, self.num_key_value_heads)
@@ -335,6 +336,9 @@ class VLAFlowMatching(nn.Module):
     │  │ language tokens           │
     │  image(s)                    │
     └──────────────────────────────┘
+    
+    **Model Architecture: VLAFlowMatching combine backbone, action expert and flow matching to train by loss and form action from noise. 
+
     """
 
     def __init__(self, config: SmolVLAConfig, rtc_processor: RTCProcessor | None = None):
@@ -353,6 +357,8 @@ class VLAFlowMatching(nn.Module):
             expert_width_multiplier=self.config.expert_width_multiplier,
             device=self.config.device if self.config.device is not None else "auto",
         )
+
+        # Projection to hidden_size (vlm_width or expert_width)
         self.state_proj = nn.Linear(
             self.config.max_state_dim, self.vlm_with_expert.config.text_config.hidden_size
         )
@@ -365,6 +371,7 @@ class VLAFlowMatching(nn.Module):
         self.action_time_mlp_out = nn.Linear(
             self.vlm_with_expert.expert_hidden_size, self.vlm_with_expert.expert_hidden_size
         )
+
 
         self.set_requires_grad()
         self.fake_image_token = self.vlm_with_expert.processor.tokenizer.fake_image_token_id
@@ -424,6 +431,7 @@ class VLAFlowMatching(nn.Module):
                 embs.append(image_start_token)
                 pad_masks.append(image_start_mask)
 
+            # output img_emb from Vision Encoder
             img_emb = self.vlm_with_expert.embed_image(img)
             img_emb = img_emb
 
@@ -452,6 +460,8 @@ class VLAFlowMatching(nn.Module):
                 embs.append(image_end_token)
                 pad_masks.append(image_end_mask)
                 att_masks += [0] * (image_end_mask.shape[1])
+        
+        # Ouput lang_emb from Text Encoder
         lang_emb = self.vlm_with_expert.embed_language_tokens(lang_tokens)
         # Normalize language embeddings
         lang_emb_dim = lang_emb.shape[-1]
@@ -500,7 +510,7 @@ class VLAFlowMatching(nn.Module):
         pad_masks = []
         att_masks = []
 
-        # Fuse timestep + action information using an MLP
+        # Fuse timestep + action information using a linear
         action_emb = self.action_in_proj(noisy_actions)
         device = action_emb.device
         bsize = action_emb.shape[0]
