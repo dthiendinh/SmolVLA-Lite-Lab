@@ -13,6 +13,7 @@ Includes:
 """
 
 import math
+import json
 from pathlib import Path
 
 import cv2
@@ -209,13 +210,16 @@ class EpisodicDataset(Dataset):
     Dữ liệu trả về còn thô: processor sẽ normalize đúng một lần.
     """
 
-    def __init__(self, dataset_dir, episodes, camera_names, chunk_size, task,
-                 legacy_joint_order=False):
+    def __init__(self, dataset_dir, episodes, camera_names, chunk_size, task=None,
+                 legacy_joint_order=False, episode_tasks=None):
         self.root = Path(dataset_dir)
         self.episodes = list(episodes)
         self.camera_names = list(camera_names)
         self.chunk_size = int(chunk_size)
         self.task = task
+        self.episode_tasks = {}
+        if self.chunk_size < 1:
+            raise ValueError("chunk_size must be positive")
         self.arrays = []
         self.ends = []
         self.image_shapes = {}
@@ -224,6 +228,17 @@ class EpisodicDataset(Dataset):
             if Path(name).name != name:
                 raise ValueError(f"Invalid episode directory name: {name}")
             path = self.root / name
+            instruction = task
+            if instruction is None and episode_tasks is not None:
+                instruction = episode_tasks.get(name)
+            if instruction is None:
+                metadata_path = path / "metadata.json"
+                if not metadata_path.is_file():
+                    raise ValueError(f"{path}: missing task; provide --task or metadata.json")
+                instruction = json.loads(metadata_path.read_text(encoding="utf-8")).get("task")
+            if not isinstance(instruction, str) or not instruction.strip():
+                raise ValueError(f"{path}: task must be a nonempty instruction")
+            self.episode_tasks[name] = instruction.strip()
 
             # Read the states and actions
             states, actions = read_episode(path, legacy_joint_order)
@@ -272,7 +287,7 @@ class EpisodicDataset(Dataset):
             STATE: torch.from_numpy(states[start].copy()),
             ACTION: torch.from_numpy(chunk),
             "action_is_pad": torch.arange(self.chunk_size) >= valid,
-            "task": self.task,
+            "task": self.episode_tasks[self.episodes[episode_index]],
         }
         for camera in self.camera_names:
             video = self.root / self.episodes[episode_index] / f"{camera}.mp4"
