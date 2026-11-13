@@ -53,12 +53,15 @@ class RTCConfig:
 
     def __post_init__(self):
         """Validate RTC configuration parameters."""
+        self.prefix_attention_schedule = RTCAttentionSchedule(self.prefix_attention_schedule)
         if self.mode not in {"guided", "trained"}:
             raise ValueError(f"mode must be 'guided' or 'trained', got {self.mode!r}")
         if self.max_guidance_weight <= 0:
             raise ValueError(f"max_guidance_weight must be positive, got {self.max_guidance_weight}")
         if self.debug_maxlen <= 0:
             raise ValueError(f"debug_maxlen must be positive, got {self.debug_maxlen}")
+        if not isinstance(self.execution_horizon, int) or self.execution_horizon < 0:
+            raise ValueError("execution_horizon must be a nonnegative integer")
 
 
 

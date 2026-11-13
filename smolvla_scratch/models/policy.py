@@ -70,6 +70,8 @@ class SmolVLAPolicy(nn.Module):
         self._queues = {
             ACTION: deque(maxlen=self.config.n_action_steps)
         }
+        if self.rtc_processor is not None:
+            self.rtc_processor.reset_tracker()
 
     # Return trainable params
     def get_optim_params(self):
@@ -87,7 +89,6 @@ class SmolVLAPolicy(nn.Module):
         images = []
         img_masks = []
         present_img_keys = [key for key in self.image_keys if key in batch]
-        missing_img_keys = [key for key in self.image_keys if key not in batch]
 
         if not present_img_keys:
             raise ValueError(
@@ -116,21 +117,30 @@ class SmolVLAPolicy(nn.Module):
 
             # valid mask for each image
             if f"{key}_padding_mask" in batch:
-                mask = batch[f"{key}_padding_mask"].bool()
+                mask = batch[f"{key}_padding_mask"].to(device=device, dtype=torch.bool)
+                if mask.ndim == 2:
+                    mask = mask[:, -1]
+                if mask.shape != (bsize,):
+                    raise ValueError(f"{key}_padding_mask must be [B] or [B, observations]")
             else:
                 mask = torch.ones(bsize, dtype=torch.bool, device=device)
             images.append(img)
             img_masks.append(mask)
 
-        # Create image features not present in the batch
-        # as fully 0 padded images.
-        for num_empty_cameras in range(len(missing_img_keys)):
-            if num_empty_cameras >= self.config.empty_cameras:
-                break
-            img = torch.ones_like(img) * -1
-            mask = torch.zeros_like(mask)
-            images.append(img)
-            img_masks.append(mask)
+        # Keep configured camera order even when an earlier camera is missing.
+        prepared = dict(zip(present_img_keys, zip(images, img_masks)))
+        images, img_masks = [], []
+        num_empty_cameras = 0
+        for key in self.image_keys:
+            if key in prepared:
+                image, valid = prepared[key]
+            elif num_empty_cameras < self.config.empty_cameras:
+                image, valid = torch.full_like(img, -1), torch.zeros_like(mask)
+                num_empty_cameras += 1
+            else:
+                continue
+            images.append(image)
+            img_masks.append(valid)
         return images, img_masks
 
     def prepare_state(self, batch):

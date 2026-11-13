@@ -34,7 +34,7 @@ def build_parser():
     # Train
     parser.add_argument("--dataset_dir")
     parser.add_argument("--ckpt_dir")
-    parser.add_argument("--task", help="Language instruction; one task for all training episodes")
+    parser.add_argument("--task", help="Override the instruction for all episodes; otherwise read each episode's metadata.json")
     parser.add_argument("--camera_names", nargs="+", default=["front", "wrist"])
     parser.add_argument("--num_episodes", type=int)
     parser.add_argument("--legacy_joint_order", action="store_true")

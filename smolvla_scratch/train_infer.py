@@ -23,6 +23,7 @@ from smolvla_scratch.main import (
     build_parser, choose_device, make_policy, make_optimizer, make_processor,
 )
 from smolvla_scratch.configuration.configuration_smolvla import SmolVLAConfig
+from smolvla_scratch.models.rtc_processor import RTCAttentionSchedule
 from smolvla_scratch.utils.vla_utils import (
     ACTION, STATE, JOINT_NAMES, EpisodicDataset, read_episode,
 )
@@ -63,15 +64,17 @@ def load_data(args, metadata=None):
             "train_episodes": shuffled[n_val:], "val_episodes": shuffled[:n_val],
             "camera_names": args.camera_names, "task": args.task,
             "chunk_size": args.chunk_size, "legacy_joint_order": args.legacy_joint_order,
-            "joint_names": JOINT_NAMES,
+            "joint_names": JOINT_NAMES, "validation_batch_size": args.batch_size,
         }
     common = dict(
         dataset_dir=root, camera_names=metadata["camera_names"],
         chunk_size=metadata["chunk_size"], task=metadata["task"],
         legacy_joint_order=metadata["legacy_joint_order"],
+        episode_tasks=metadata.get("episode_tasks"),
     )
     val = EpisodicDataset(episodes=metadata["val_episodes"], **common)
-    options = dict(batch_size=args.batch_size, num_workers=args.num_workers,
+    batch_size = metadata.get("validation_batch_size", args.batch_size) if args.eval else args.batch_size
+    options = dict(batch_size=batch_size, num_workers=args.num_workers,
                    pin_memory=str(args.device).startswith("cuda"))
     val_loader = DataLoader(val, shuffle=False, **options)
     if args.eval:
@@ -79,6 +82,10 @@ def load_data(args, metadata=None):
     train = EpisodicDataset(episodes=metadata["train_episodes"], **common)
     if train.image_shapes != val.image_shapes:
         raise ValueError("Train/validation camera resolutions differ")
+    metadata["episode_tasks"] = {**train.episode_tasks, **val.episode_tasks}
+    tasks = set(metadata["episode_tasks"].values())
+    if metadata["task"] is None and len(tasks) == 1:
+        metadata["task"] = next(iter(tasks))
     return DataLoader(train, shuffle=True, **options), val_loader, get_norm_stats(train), metadata
 
 
@@ -145,7 +152,8 @@ def validate(policy, loader, processor, seed, *, action_metrics=False):
 def save_checkpoint(path, policy, stats, metadata, epoch, best_loss):
     """Store weights together with config/stats/split so eval can restore them."""
     payload = {
-        "format_version": 1, "policy_config": asdict(policy.config),
+        # Store nested enums as plain strings, compatible with weights_only=True.
+        "format_version": 1, "policy_config": json.loads(json.dumps(asdict(policy.config))),
         "model": policy.state_dict(), "dataset_stats": stats,
         "data": metadata, "epoch": epoch, "best_val_loss": best_loss,
     }
@@ -155,12 +163,15 @@ def save_checkpoint(path, policy, stats, metadata, epoch, best_loss):
 
 
 def load_checkpoint(path, device):
-    payload = torch.load(path, map_location="cpu", weights_only=True)
+    # Older local RTC checkpoints stored this known Enum directly.
+    with torch.serialization.safe_globals([RTCAttentionSchedule]):
+        payload = torch.load(path, map_location="cpu", weights_only=True)
     if payload.get("format_version") != 1:
         raise ValueError("Checkpoint needs model/config/stats/data; a weights-only file is insufficient")
     if payload["data"]["joint_names"] != JOINT_NAMES:
         raise ValueError("Unsupported checkpoint joint schema")
-    policy_config = SmolVLAConfig(**{**payload["policy_config"], "device": str(device)})
+    policy_config = SmolVLAConfig(**{**payload["policy_config"], "device": str(device),
+                                   "load_vlm_weights": False})
     policy = make_policy(policy_config)
     policy.load_state_dict(payload["model"], strict=True)
     policy.eval()
@@ -389,7 +400,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     # Check the args param
-    for name in ("batch_size", "num_epochs", "chunk_size", "num_steps", "save_every", "episode_len", "num_rollouts"):
+    for name in ("batch_size", "num_epochs", "chunk_size", "num_euler_steps", "save_every", "episode_len", "num_rollouts"):
         if getattr(args, name) < 1:
             parser.error(f"--{name} must be positive")
     if args.num_workers < 0 or not 0 < args.val_ratio < 1:
@@ -409,10 +420,12 @@ def main(argv=None):
     if args.eval or args.rollout:
         if not args.checkpoint or (args.eval and not args.dataset_dir):
             parser.error("eval needs checkpoint/dataset_dir; rollout needs checkpoint")
-    elif not args.dataset_dir or not args.ckpt_dir or not args.task or not args.task.strip():
-        parser.error("Training needs --dataset_dir, --ckpt_dir and a nonempty --task")
+    elif not args.dataset_dir or not args.ckpt_dir:
+        parser.error("Training needs --dataset_dir and --ckpt_dir")
     elif args.checkpoint:
         parser.error("--checkpoint is for eval/rollout; training initializes a new action expert")
+    if args.task is not None and not args.task.strip():
+        parser.error("--task must be nonempty when supplied")
     
     # Choose device
     args.device = str(choose_device(args.device))

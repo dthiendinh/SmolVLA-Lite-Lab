@@ -98,7 +98,7 @@ class SmolVLAConfig:
     # 10. Model Config
     # TODO: Change the bool value here 
     vlm_model_name: str = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"  # Select the VLM backbone.
-    load_vlm_weights: bool = True  # Set to False in case of training the expert from scratch. True when init from pretrained SmolVLA weights
+    load_vlm_weights: bool = True  # Load pretrained VLM backbone; the action expert is initialized separately.
 
     add_image_special_tokens: bool = False  # Whether to use special image tokens around image features.
 
@@ -123,6 +123,8 @@ class SmolVLAConfig:
     compile_mode: str = "max-autotune"  # Torch compile mode
 
     def __post_init__(self):
+        if isinstance(self.rtc_config, dict):
+            self.rtc_config = RTCConfig(**self.rtc_config)
         if self.chunk_size <= 0:
             raise ValueError("chunk_size must be positive")
 
