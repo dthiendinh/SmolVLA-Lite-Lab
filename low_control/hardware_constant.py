@@ -8,8 +8,8 @@ ROBOT_STATE = 6
 
 CAMERA_FPS = 30
 CAMERA_CONFIGS = {
-    "front": dict(index_or_path=0, width=1280, height=720, fps=CAMERA_FPS),
-    "wrist": dict(index_or_path=1, width=1280, height=720, fps=CAMERA_FPS),
+    "front": dict(index_or_path=1, width=640, height=480, fps=CAMERA_FPS),
+    "wrist": dict(index_or_path=0, width=640, height=480, fps=CAMERA_FPS),
 }
 
 
