@@ -28,7 +28,7 @@ def set_seed(seed):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     mode = parser.add_mutually_exclusive_group()
 
     # Train
@@ -39,7 +39,8 @@ def build_parser():
     parser.add_argument("--num_episodes", type=int)
     parser.add_argument("--legacy_joint_order", action="store_true")
     parser.add_argument("--batch_size", type=int, default=4)
-    parser.add_argument("--num_epochs", type=int, default=100)
+    parser.add_argument("--num_epochs", type=int, default=100,
+                        help="Total target epochs, including epochs already completed when resuming")
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--val_ratio", type=float, default=0.2)
@@ -51,12 +52,19 @@ def build_parser():
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
     parser.add_argument("--vlm_model_name", default="HuggingFaceTB/SmolVLM2-500M-Video-Instruct")
 
+    # Resume tiếp tục cùng một run; fine-tuning chỉ dùng weights để mở run mới.
+    # Đặt cùng nhóm với eval/rollout để không thể bật hai chế độ cùng lúc.
+    mode.add_argument("--resume", metavar="CHECKPOINT", help="Resume a full training checkpoint at the next epoch")
+    mode.add_argument("--finetune", metavar="CHECKPOINT", help="Start a new run from local policy weights (v1 or v2)")
+    parser.add_argument("--finetune_stats", choices=["checkpoint", "dataset"], default="checkpoint",
+                        help="Fine-tuning normalization: preserve source stats (default) or recompute on new train split")
+
     # Eval 
     mode.add_argument("--eval", action="store_true", help="Offline validation + sampled action error")
     mode.add_argument("--rollout", action="store_true", help="Run an explicitly supplied environment")
     parser.add_argument("--episode_len", type=int, default=1000)
     parser.add_argument("--num_rollouts", type=int, default=1)
-    parser.add_argument("--checkpoint", help="Checkpoint created by this script; required for eval/rollout")
+    parser.add_argument("--checkpoint", help="Local policy/training checkpoint; required for eval/rollout")
     # Dont need
     parser.add_argument("--env_factory", help="Optional custom factory; default low_control.low_level_control:make_real_env")
     parser.add_argument("--env_kwargs", help="JSON file containing environment factory keyword arguments")
