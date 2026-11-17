@@ -211,10 +211,10 @@ def train_bc(train_dataloader, val_dataloader, stats, config):
     optimizer = make_optimizer(policy)
 
     # ===== MODEL PARAMETERS =====
-    total_params = sum(p.numel() for p in model.parameters())
+    total_params = sum(p.numel() for p in policy.parameters())
 
     trainable_params = sum(
-        p.numel() for p in model.parameters()
+        p.numel() for p in policy.parameters()
         if p.requires_grad
     )
 
