@@ -210,6 +210,19 @@ def train_bc(train_dataloader, val_dataloader, stats, config):
         policy.load_state_dict(initial['model'], strict=True)
     optimizer = make_optimizer(policy)
 
+    # ===== MODEL PARAMETERS =====
+    total_params = sum(p.numel() for p in model.parameters())
+
+    trainable_params = sum(
+        p.numel() for p in model.parameters()
+        if p.requires_grad
+    )
+
+    print(f"Total params: {total_params / 1e6:.2f}M")
+    print(f"Trainable params: {trainable_params / 1e6:.2f}M")
+    print(f"Frozen params: {(total_params - trainable_params) / 1e6:.2f}M")
+    print(f"Trainable ratio: {100 * trainable_params / total_params:.2f}%")
+
     # LambdaLR không lưu closure lr_lambda trong state_dict. Phải dựng lại
     # bằng horizon GỐC, sau đó mới nạp scheduler và optimizer. Nếu kéo dài
     # num_epochs khi resume, LR vẫn theo lịch cũ và giữ floor khi lịch kết thúc.

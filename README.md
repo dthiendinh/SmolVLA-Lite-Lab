@@ -106,16 +106,15 @@ Kiểm tra trọn luồng đọc dữ liệu, tải backbone, tính loss và lư
 
 ```bash
 python -B -m smolvla_scratch.train_infer \
-  --dataset_dir data_recording/data/pick_place_smolvla_v1 \
+  --dataset_dir ../data/pick_place_smolvla_v1 \
   --ckpt_dir outputs/pick_place_smoke \
-  --camera_names front wrist \
-  --batch_size 1 \
+  --batch_size 4 \
   --num_epochs 1 \
   --chunk_size 50 \
   --lr 1e-4 \
   --seed 0 \
   --num_workers 0 \
-  --device auto
+  --device cuda
 ```
 
 Dùng thư mục output mới hoặc rỗng. Nếu đã chạy thử vào thư mục trên, đổi tên thư mục cho lần thử tiếp theo.
