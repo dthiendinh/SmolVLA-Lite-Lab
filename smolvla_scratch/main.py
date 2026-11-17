@@ -49,6 +49,8 @@ def build_parser():
     parser.add_argument("--n_action_steps", type=int, help="Default: chunk_size")
     parser.add_argument("--num_euler_steps", type=int, default=10, help="Euler denoising steps at inference")
     parser.add_argument("--save_every", type=int, default=200)
+    parser.add_argument("--log_every", type=int, default=10,
+                        help="Write TensorBoard step metrics every N optimizer updates (default: 10)")
     parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
     parser.add_argument("--vlm_model_name", default="HuggingFaceTB/SmolVLM2-500M-Video-Instruct")
 

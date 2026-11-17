@@ -33,7 +33,7 @@ python -B -m smolvla_scratch.train_infer \
   --resume outputs/run1/policy_last.ckpt --device auto
 ```
 
-Mặc định lấy dataset và tổng số epoch từ checkpoint, ghi tiếp vào thư mục chứa `policy_last.ckpt`. Có thể đổi `--device`, `--num_workers`, `--save_every`, hoặc chuyển nguyên dataset sang đường dẫn mới bằng `--dataset_dir`. Kết quả khớp chính xác với train liên tục chỉ được kiểm tra trên CPU cùng môi trường; thay phần cứng/backend có thể tạo sai khác số học và RNG.
+Mặc định lấy dataset và tổng số epoch từ checkpoint, ghi tiếp vào thư mục chứa `policy_last.ckpt`. Có thể đổi `--device`, `--num_workers`, `--save_every`, `--log_every`, hoặc chuyển nguyên dataset sang đường dẫn mới bằng `--dataset_dir`. Kết quả khớp chính xác với train liên tục chỉ được kiểm tra trên CPU cùng môi trường; thay phần cứng/backend có thể tạo sai khác số học và RNG.
 
 Có thể đặt `--ckpt_dir outputs/run1_resumed` để ghi tiếp vào thư mục mới. Không cần copy `policy_best.ckpt` thủ công vì full checkpoint chứa best snapshot của thời điểm lưu.
 
@@ -93,6 +93,7 @@ Stats mới chỉ tính trên train split mới. Đổi stats sẽ đổi cả g
 | `policy_last.ckpt` | Cuối mỗi epoch | Có | Có |
 | `policy_epoch_<index>_seed_<seed>.ckpt` | Mỗi `save_every` epoch | Có | Có |
 | `history.json` | Cuối mỗi epoch | Lịch sử được lấy từ full checkpoint | Dùng để xem loss/LR |
+| `tensorboard/` | Trong lúc train | Nối tiếp global step; ẩn phần epoch phải chạy lại | Xem biểu đồ trực tiếp |
 | `training_config.json` | Khi mở run mới | Mô tả cấu hình | Tham khảo |
 | `resume_config.json` | Khi resume trong cùng thư mục | Mô tả lần resume gần nhất | Tham khảo |
 
@@ -117,6 +118,28 @@ Full checkpoint thêm `training_state`:
 Full checkpoint lớn hơn model checkpoint vì chứa optimizer và bản best model. Checkpoint định kỳ được giữ lại, vì vậy số lượng file tăng theo run. Các file được ghi sang `.tmp` rồi thay thế file đích sau khi ghi xong. Nếu crash giữa lúc ghi, resume từ file `.ckpt` đã hoàn tất, không chọn `.tmp`.
 
 `history.json` và config là file tiện đọc; nguồn chính xác để resume là full `.ckpt`. Thứ tự khôi phục là: dựng model → nạp weights → dựng optimizer/scheduler → nạp scheduler → nạp optimizer → khôi phục RNG sau cùng. Thứ tự này tránh khởi tạo model tiêu thụ mất chuỗi random đã lưu hoặc scheduler ghi đè LR được khôi phục. Xem [PyTorch Optimizer.load_state_dict](https://docs.pytorch.org/docs/stable/generated/torch.optim.Optimizer.load_state_dict.html).
+
+### Xem TensorBoard trong lúc train
+
+Trainer tự ghi event files vào `<ckpt_dir>/tensorboard/`, thay cho vẽ PNG sau khi kết thúc. Cài `tensorboard>=2.20,<3` trong môi trường train rồi mở terminal thứ hai, cùng môi trường và thư mục repo:
+
+```bash
+tensorboard --logdir outputs --reload_interval 5 --port 6006
+```
+
+Mở [http://localhost:6006](http://localhost:6006). Dùng `Scalars` để xem:
+
+- `loss/train_step`: loss batch mỗi `--log_every` optimizer update, mặc định 10; luôn ghi update đầu tiên và cuối mỗi epoch.
+- `loss/train_epoch`, `loss/val_epoch`, `loss/best_val`: loss trung bình epoch và validation tốt nhất, cập nhật sau mỗi epoch.
+- `learning_rate/step`: LR thực dùng cho update đó, trước khi scheduler tiến sang bước kế tiếp; `learning_rate/epoch` là LR sẵn sàng cho bước kế tiếp cuối epoch, khớp history.
+- `grad_norm/before_clip`: gradient norm trước khi clipping, giúp theo dõi độ lớn update cùng LR.
+- `progress/epoch`: số epoch đã hoàn tất, bắt đầu từ 1.
+
+`Custom Scalars` → `Loss` → `Train vs validation` đặt hai đường loss epoch lên cùng biểu đồ. Các scalar dùng global step làm trục ngang. Train loss theo step có từ epoch đầu; val loss chờ hoàn tất validation. Log được flush mỗi khoảng 10 giây, sau mỗi epoch và khi thoát khỏi vòng train, kể cả ngắt bằng Ctrl+C. Dashboard có thể chậm thêm một chu kỳ đọc lại.
+
+Muốn ghi mỗi update, thêm `--log_every 1`. Nếu run nằm ngoài `outputs`, trỏ `--logdir` đến thư mục run hoặc thư mục cha phù hợp. Không cần đổi batch size hay LR để bật logging. Có thể so nhiều run khi trỏ `--logdir` vào thư mục cha.
+
+Resume giữ các điểm đã thuộc checkpoint và dùng `purge_step` để ẩn điểm của epoch chưa hoàn tất trước khi chạy lại. Nếu chưa có event files (checkpoint cũ hoặc resume sang thư mục mới), biểu đồ epoch được khôi phục từ history trong checkpoint; không khôi phục được loss từng batch cũ. Cách hoạt động của writer: [PyTorch SummaryWriter](https://docs.pytorch.org/docs/stable/tensorboard.html).
 
 ## 4. Đánh giá offline và rollout
 

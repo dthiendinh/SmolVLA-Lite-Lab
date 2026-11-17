@@ -155,6 +155,7 @@ python -B -m smolvla_scratch.train_infer \
 | `--seed 0` | Seed cho split, khởi tạo, shuffle và noise |
 | `--num_workers 0` | Đọc dữ liệu trong tiến trình chính |
 | `--save_every 10` | Lưu thêm full checkpoint định kỳ mỗi 10 epoch |
+| `--log_every 10` | Ghi train loss, LR và gradient norm lên TensorBoard mỗi 10 update |
 | `--num_episodes N` | Tùy chọn: chỉ lấy N thư mục episode đầu theo tên đã sắp xếp |
 
 Loader tách **theo episode** và chỉ tính normalization từ train split. Một epoch đi qua các timestep của train split; mỗi mẫu gồm ảnh/state tại `t`, instruction và action từ `t` đến `t + chunk_size - 1`. Phần action vượt cuối episode được padding và loại khỏi loss.
@@ -167,6 +168,7 @@ Khi bắt đầu, trainer kiểm tra dữ liệu và tính SHA-256 cho NPZ/video
 outputs/pick_place_run1/
 ├── training_config.json
 ├── history.json
+├── tensorboard/
 ├── policy_best.ckpt
 ├── policy_last.ckpt
 ├── policy_last_model.ckpt
@@ -183,7 +185,23 @@ outputs/pick_place_run1/
 | `history.json` | Train loss, validation loss, LR và global step theo epoch |
 | `training_config.json` | Cấu hình model, dataset, split và stats của run |
 
-Nếu có matplotlib, trainer còn lưu biểu đồ loss. Mọi checkpoint model đều chứa cả backbone và expert; full checkpoint lớn hơn vì có trạng thái training và best snapshot. `--save_every` chỉ điều khiển checkpoint định kỳ: `policy_last.ckpt` vẫn được lưu **mỗi epoch**.
+Trainer ghi biểu đồ trực tiếp vào TensorBoard trong lúc train, thay cho ảnh loss PNG cuối run. Cài dependency mới vào môi trường đang dùng:
+
+```bash
+python -m pip install 'tensorboard>=2.20,<3'
+```
+
+Giữ lệnh train của bạn như cũ (ví dụ `--batch_size 32`). Mở terminal thứ hai tại gốc repo, kích hoạt cùng môi trường và chạy:
+
+```bash
+tensorboard --logdir outputs --reload_interval 5 --port 6006
+```
+
+Mở [TensorBoard](http://localhost:6006). `Scalars` có train loss mỗi 10 update, learning rate thực dùng và gradient norm trước khi clip. `Custom Scalars` → `Loss` → `Train vs validation` đặt train/val loss trung bình epoch lên cùng biểu đồ. Trục ngang là số optimizer update; `progress/epoch` cho biết số epoch đã hoàn tất. Validation loss cập nhật sau mỗi epoch; train loss theo step có từ epoch đầu. Log được flush mỗi khoảng 10 giây và sau mỗi epoch, không cần chờ train xong. Có thể thêm `--log_every 1` để ghi mỗi update.
+
+Mỗi run có log riêng tại `<ckpt_dir>/tensorboard/`; `--logdir outputs` xem được nhiều run. Nếu `ckpt_dir` nằm ngoài `outputs`, đổi `--logdir` sang thư mục chứa run đó. Resume tiếp tục đúng global step và ẩn log thuộc phần epoch chưa được checkpoint. Nếu resume checkpoint cũ chưa có event files hoặc resume sang thư mục mới, trainer khôi phục biểu đồ theo epoch từ history trong checkpoint; các điểm theo step cũ không thể khôi phục.
+
+Mọi checkpoint model đều chứa cả backbone và expert; full checkpoint lớn hơn vì có trạng thái training và best snapshot. `--save_every` chỉ điều khiển checkpoint định kỳ: `policy_last.ckpt` vẫn được lưu **mỗi epoch**.
 
 ## 6. Resume khi train bị ngắt
 

@@ -29,6 +29,7 @@ from smolvla_scratch.checkpointing import (
 from smolvla_scratch.utils.vla_utils import (
     ACTION, STATE, JOINT_NAMES, EpisodicDataset,
 )
+from smolvla_scratch.training_logging import TensorBoardLogger, require_tensorboard
 
 def set_seed(seed):
     """Seed cho split, shuffle, khởi tạo model và noise khi train."""
@@ -187,8 +188,9 @@ def train_bc(train_dataloader, val_dataloader, stats, config):
     seed = config['seed']
     metadata = {**config['data'], "validation_seed": seed}
     save_every = config.get('save_every', 100)
-    if num_epochs < 1 or save_every < 1 or not len(train_dataloader) or not len(val_dataloader):
-        raise ValueError("Positive epochs/save_every and nonempty loaders are required")
+    log_every = config.get('log_every', 10)
+    if num_epochs < 1 or save_every < 1 or log_every < 1 or not len(train_dataloader) or not len(val_dataloader):
+        raise ValueError("Positive epochs/save_every/log_every and nonempty loaders are required")
     initial = config.get('initial_checkpoint')
     resumed = initial['training_state'] if config.get('mode') == 'resume' else None
     start_epoch = initial['epoch'] + 1 if resumed else 0
@@ -196,6 +198,7 @@ def train_bc(train_dataloader, val_dataloader, stats, config):
         raise ValueError(f"Checkpoint completed {start_epoch} epochs; --num_epochs must be greater than {start_epoch}")
     if resumed and resumed['steps_per_epoch'] != len(train_dataloader):
         raise ValueError("Resume requires the original batch size and number of train batches")
+    require_tensorboard()
 
     policy_config = config['policy_config']
     if isinstance(policy_config, dict):
@@ -252,91 +255,77 @@ def train_bc(train_dataloader, val_dataloader, stats, config):
     # Payload best_state vẫn được giữ riêng để lưu full checkpoint và trả về.
     config.pop('initial_checkpoint', None)
     del initial, resumed
-    with tqdm(total=num_epochs, initial=start_epoch, desc="Training", dynamic_ncols=True) as progress:
-        for epoch in range(start_epoch, num_epochs):
-            policy.train()
-            batch_losses = []
-            for data in train_dataloader:
-                optimizer.zero_grad(set_to_none=True)
-                loss, _ = forward_pass(data, policy, processor)
-                if not torch.isfinite(loss):
-                    raise RuntimeError("Non-finite training loss; inspect data and learning rate")
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    [p for p in policy.parameters() if p.requires_grad],
-                    policy.config.optimizer_grad_clip_norm, error_if_nonfinite=True)
-                optimizer.step()
-                scheduler.step()
-                global_step += 1
-                batch_losses.append(loss.item())
-            epoch_train_loss = sum(batch_losses) / len(batch_losses)
-
-            # Noise/time validation dùng generator riêng và seed cố định,
-            # cùng quy trình với đánh giá offline để so sánh checkpoint.
-            val = validate(policy, val_dataloader, processor, seed)
-            epoch_val_loss = val["flow_loss"]
-            if epoch_val_loss < min_val_loss:
-                min_val_loss = epoch_val_loss
-                best_epoch = epoch
-                best_state = {name: value.detach().cpu().clone()
-                              for name, value in policy.state_dict().items()}
-                # File model nhẹ hơn: không có optimizer/scheduler/RNG/history.
-                save_checkpoint(ckpt_dir / "policy_best.ckpt", policy, stats, metadata, epoch, min_val_loss)
-
-            history.append(dict(epoch=epoch, train_loss=epoch_train_loss, val_loss=epoch_val_loss,
-                                lr=optimizer.param_groups[0]["lr"], global_step=global_step))
-            training_state = {
-                "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
-                "rng": capture_rng_state(), "history": history,
-                "best_epoch": best_epoch, "best_model": best_state,
-                "global_step": global_step, "scheduler_total_steps": scheduler_total_steps,
-                "steps_per_epoch": len(train_dataloader),
-                "arguments": config.get('arguments', {}),
-                "dataset_manifest": config.get('dataset_manifest', {}),
-            }
-            # Checkpoint full luôn ở cuối epoch: resume lặp lại phần epoch
-            # chưa hoàn thành nếu tiến trình bị ngắt giữa epoch tiếp theo.
-            save_checkpoint(ckpt_dir / "policy_last.ckpt", policy, stats, metadata, epoch,
-                            min_val_loss, training_state=training_state)
-            if (epoch + 1) % save_every == 0:
-                save_checkpoint(ckpt_dir / f"policy_epoch_{epoch}_seed_{seed}.ckpt",
-                                policy, stats, metadata, epoch, min_val_loss,
-                                training_state=training_state)
-            (ckpt_dir / "history.json").write_text(json.dumps(history, indent=2) + "\n")
-            progress.set_postfix(train=f"{epoch_train_loss:.4f}", val=f"{epoch_val_loss:.4f}",
-                                 best=f"{min_val_loss:.4f}", refresh=False)
-            progress.update(1)
-
-    # Export model cuối cùng riêng để fine-tuning/eval không phải mang theo
-    # optimizer và best snapshot. Full policy_last.ckpt vẫn dùng để resume.
-    save_checkpoint(ckpt_dir / "policy_last_model.ckpt", policy, stats, metadata,
-                    num_epochs - 1, min_val_loss)
-    print(f"Training finished: seed={seed}, best val={min_val_loss:.6f} at epoch {best_epoch}")
-    plot_history([{"loss": row['train_loss']} for row in history],
-                 [{"loss": row['val_loss']} for row in history], num_epochs, ckpt_dir, seed)
-    return best_epoch, min_val_loss, best_state
-
-
-def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
-    """History entries contain Python floats; plotting is optional."""
+    logger = TensorBoardLogger(ckpt_dir, history=history, global_step=global_step)
+    print(f"TensorBoard logs: {logger.log_dir}", flush=True)
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("Install matplotlib to generate loss plots; history.json is available.")
-        return
-    for key in train_history[0]:
-        fig, ax = plt.subplots()
-        ax.plot(range(1, len(train_history) + 1),
-                [float(row[key]) for row in train_history], label="train")
-        ax.plot(range(1, len(validation_history) + 1),
-                [float(row[key]) for row in validation_history], label="validation")
-        ax.set(xlabel="Epoch", ylabel=key, title=key)
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig(Path(ckpt_dir) / f"train_val_{key}_seed_{seed}.png")
-        plt.close(fig)
+        with tqdm(total=num_epochs, initial=start_epoch, desc="Training", dynamic_ncols=True) as progress:
+            for epoch in range(start_epoch, num_epochs):
+                policy.train()
+                batch_losses = []
+                for batch_index, data in enumerate(train_dataloader):
+                    optimizer.zero_grad(set_to_none=True)
+                    loss, _ = forward_pass(data, policy, processor)
+                    if not torch.isfinite(loss):
+                        raise RuntimeError("Non-finite training loss; inspect data and learning rate")
+                    loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        [p for p in policy.parameters() if p.requires_grad],
+                        policy.config.optimizer_grad_clip_norm, error_if_nonfinite=True)
+                    step_lr = optimizer.param_groups[0]["lr"]
+                    optimizer.step()
+                    scheduler.step()
+                    global_step += 1
+                    batch_losses.append(loss.item())
+                    if global_step == 1 or global_step % log_every == 0 or batch_index + 1 == len(train_dataloader):
+                        logger.log_step(loss.item(), step_lr, grad_norm.item(), global_step)
+                epoch_train_loss = sum(batch_losses) / len(batch_losses)
+
+                # Noise/time validation dùng generator riêng và seed cố định,
+                # cùng quy trình với đánh giá offline để so sánh checkpoint.
+                val = validate(policy, val_dataloader, processor, seed)
+                epoch_val_loss = val["flow_loss"]
+                if epoch_val_loss < min_val_loss:
+                    min_val_loss = epoch_val_loss
+                    best_epoch = epoch
+                    best_state = {name: value.detach().cpu().clone()
+                                  for name, value in policy.state_dict().items()}
+                    # File model nhẹ hơn: không có optimizer/scheduler/RNG/history.
+                    save_checkpoint(ckpt_dir / "policy_best.ckpt", policy, stats, metadata, epoch, min_val_loss)
+
+                history.append(dict(epoch=epoch, train_loss=epoch_train_loss, val_loss=epoch_val_loss,
+                                    lr=optimizer.param_groups[0]["lr"], global_step=global_step))
+                logger.log_epoch(history[-1], min_val_loss)
+                training_state = {
+                    "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
+                    "rng": capture_rng_state(), "history": history,
+                    "best_epoch": best_epoch, "best_model": best_state,
+                    "global_step": global_step, "scheduler_total_steps": scheduler_total_steps,
+                    "steps_per_epoch": len(train_dataloader),
+                    "arguments": config.get('arguments', {}),
+                    "dataset_manifest": config.get('dataset_manifest', {}),
+                }
+                # Checkpoint full luôn ở cuối epoch: resume lặp lại phần epoch
+                # chưa hoàn thành nếu tiến trình bị ngắt giữa epoch tiếp theo.
+                save_checkpoint(ckpt_dir / "policy_last.ckpt", policy, stats, metadata, epoch,
+                                min_val_loss, training_state=training_state)
+                if (epoch + 1) % save_every == 0:
+                    save_checkpoint(ckpt_dir / f"policy_epoch_{epoch}_seed_{seed}.ckpt",
+                                    policy, stats, metadata, epoch, min_val_loss,
+                                    training_state=training_state)
+                (ckpt_dir / "history.json").write_text(json.dumps(history, indent=2) + "\n")
+                progress.set_postfix(train=f"{epoch_train_loss:.4f}", val=f"{epoch_val_loss:.4f}",
+                                     best=f"{min_val_loss:.4f}", refresh=False)
+                progress.update(1)
+
+        # Export model cuối cùng riêng để fine-tuning/eval không phải mang theo
+        # optimizer và best snapshot. Full policy_last.ckpt vẫn dùng để resume.
+        save_checkpoint(ckpt_dir / "policy_last_model.ckpt", policy, stats, metadata,
+                        num_epochs - 1, min_val_loss)
+        print(f"Training finished: seed={seed}, best val={min_val_loss:.6f} at epoch {best_epoch}")
+        return best_epoch, min_val_loss, best_state
+    finally:
+        # Flush recent points even when interrupted in the middle of an epoch.
+        logger.close()
 
 
 def eval_bc(policy, processor, payload, args):
@@ -519,7 +508,7 @@ def main(argv=None):
         initial = read_checkpoint(args.resume or args.finetune, for_resume=bool(args.resume))
         inherit_training_arguments(args, initial, supplied, parser)
 
-    for name in ("batch_size", "num_epochs", "chunk_size", "num_euler_steps", "save_every", "episode_len", "num_rollouts"):
+    for name in ("batch_size", "num_epochs", "chunk_size", "num_euler_steps", "save_every", "log_every", "episode_len", "num_rollouts"):
         if getattr(args, name) < 1:
             parser.error(f"--{name} must be positive")
     if args.num_workers < 0 or not 0 < args.val_ratio < 1:
@@ -609,7 +598,7 @@ def main(argv=None):
     metadata['dataset_manifest'] = manifest
     run_mode = 'resume' if args.resume else ('finetune' if args.finetune else 'new')
     config = dict(num_epochs=args.num_epochs, ckpt_dir=args.ckpt_dir, seed=args.seed,
-                  policy_config=policy_config, data=metadata, save_every=args.save_every,
+                  policy_config=policy_config, data=metadata, save_every=args.save_every, log_every=args.log_every,
                   mode=run_mode, initial_checkpoint=initial,
                   arguments=vars(args).copy(), dataset_manifest=manifest)
     del initial
