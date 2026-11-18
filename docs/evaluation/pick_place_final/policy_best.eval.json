@@ -1,0 +1,35 @@
+{
+  "flow_loss": 0.26490666437894106,
+  "action_mse": 161.21671112703993,
+  "action_mae": 8.578987624125537,
+  "num_samples": 5621,
+  "valid_action_timesteps": 267575,
+  "per_joint": {
+    "shoulder_pan.pos": {
+      "mse": 78.11985786702688,
+      "mae": 6.112611874425026
+    },
+    "shoulder_lift.pos": {
+      "mse": 174.95021772679354,
+      "mae": 10.031648518906195
+    },
+    "elbow_flex.pos": {
+      "mse": 172.02707008216467,
+      "mae": 9.883608849991468
+    },
+    "wrist_flex.pos": {
+      "mse": 304.5410464602605,
+      "mae": 12.819708660126825
+    },
+    "wrist_roll.pos": {
+      "mse": 182.79385608072204,
+      "mae": 8.636350221026616
+    },
+    "gripper.pos": {
+      "mse": 54.86821854859685,
+      "mae": 3.989997740675665
+    }
+  },
+  "validation_seed": 0,
+  "checkpoint_epoch": 1
+}
