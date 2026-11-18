@@ -13,53 +13,18 @@ Clone the repository and create a Python 3.12 environment:
 ```bash
 git clone https://github.com/dthiendinh/SmolVLA-Lite-Lab.git
 cd SmolVLA-Lite-Lab
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
+conda create --name env_name python=3.12
+conda activate env_name
+pip install -r requirements.txt
 ```
-
-If the repository is already present, start at `cd SmolVLA-Lite-Lab`. On subsequent terminal sessions, activate the existing environment:
-
-```bash
-source .venv/bin/activate
-```
-
-The supplied requirements pin PyTorch `2.11.0`, Transformers `5.22.2`, and LeRobot `0.6.1`. Check imports and CLI options before starting a run:
-
-```bash
-python -c 'import sys, torch, lerobot; print(sys.executable); print(torch.__version__); print(lerobot.__file__); print("CUDA available:", torch.cuda.is_available())'
-python -B -m smolvla_scratch.train_infer --help
-```
-
-`--device auto` selects CUDA, then MPS, then CPU. Use `--device cuda` on an NVIDIA training server, `--device mps` on a compatible Mac, or `--device cpu` explicitly. GPU training requires a working PyTorch installation for that backend.
-
-A fresh run downloads the `HuggingFaceTB/SmolVLM2-500M-Video-Instruct` backbone, configuration, and tokenizer. Resume, fine-tuning, and evaluation load weights from the local checkpoint, but still require the VLM configuration/tokenizer in the cache or accessible from the Hub.
-
-### OpenCV for the recording dashboard
-
-The teleoperation dashboard uses `cv2.imshow` and needs a desktop environment and GUI-enabled OpenCV. Inspect installed variants if the dashboard fails:
-
-```bash
-python -m pip list | python -c 'import sys; print("".join(line for line in sys.stdin if "opencv" in line.lower()))'
-```
-
-If GUI and headless variants conflict, reinstall one GUI variant in the recording environment:
-
-```bash
-python -m pip uninstall -y opencv-python opencv-python-headless
-python -m pip install 'opencv-python>=4.10,<4.14'
-```
-
-LeRobot also declares headless OpenCV in its dependencies. After this replacement, `pip check` may report that dependency as missing; reinstalling the project requirements can restore the headless variant. Offline server training does not need the recording dashboard.
 
 ## 2. Record or prepare demonstrations
 
 For new recordings, configure ports, calibration IDs, camera indices, and the robot reset pose in [`low_control/hardware_constant.py`](../../low_control/hardware_constant.py). Use the same calibration, units, and camera arrangement for recording and rollout.
 
 ```bash
-python -B -m data_recording.record_teleop_data \
-  --data-dir pick_place_smolvla_v1 \
-  --task "Pick up an orange marker and put it in the cup"
+python3 -B -m data_recording.record_teleop_data \
+  --data-dir pick_place_smolvla_v1 
 ```
 
 The recorder's `--data-dir` names a subdirectory under `data_recording/data/`. Training uses the separate `--dataset_dir` option with the dataset's actual path.
@@ -100,12 +65,6 @@ The loader reorders columns using `joint_names`. The five arm joints use degrees
 
 By default, the trainer reads each episode's instruction. `--task "..."` overrides the instruction for **every episode** and is appropriate only when the entire dataset represents that instruction. Use `--legacy_joint_order` only for legacy ACT recordings that lack `joint_names` and actually store columns in `sorted(joint_keys)` order.
 
-### Sampling and normalization
-
-The split is made by episode, so observations from one demonstration do not appear in both splits. A sample uses images and state at timestep `t`, the episode instruction, and actions starting at `t` for `chunk_size` steps. Action chunks overlap between neighboring samples. Targets beyond the episode end are padded and excluded from loss.
-
-State/action mean and standard deviation are computed only from actual training timesteps. The processor normalizes these values and pads model dimensions; action postprocessing converts predictions back to the original six-joint scales. Split membership, per-episode tasks, stats, and dataset fingerprints are saved with the checkpoint.
-
 ## 3. Run a one-epoch smoke test
 
 This checks data loading, model initialization, loss computation, validation, and checkpoint writing:
@@ -145,7 +104,6 @@ python -B -m smolvla_scratch.train_infer \
   --seed 0 \
   --num_workers 0 \
   --save_every 10 \
-  --log_every 10 \
   --device auto
 ```
 
@@ -352,24 +310,3 @@ Use the task instruction corresponding to the learned behavior. Multi-task check
 Use `--env_kwargs path/to/env.json` for a JSON object overriding environment settings such as `port`, `robot_id`, `reset_pose`, `max_relative_target`, or `dt`. The default factory is `low_control.low_level_control:make_real_env`; camera names must match the checkpoint.
 
 The CLI writes `policy_best.rollout.json` beside the checkpoint. It records step counts and returns when rewards exist. The supplied environment has no task-success detector, so `return` may be `null`. Video capture, trial outcomes, task-success labels, and completion times need to be recorded separately. Repeated rollout commands use the same summary filename; preserve each trial's summary before another command overwrites it.
-
-## 10. Troubleshooting
-
-| Symptom | Action |
-| --- | --- |
-| Module import fails | Activate the intended environment, install requirements, and run from the repository root |
-| CUDA is unavailable | Check the installed PyTorch build and GPU environment, or choose a supported device |
-| `Need at least two episodes` | Supply at least two valid episode directories |
-| Missing task | Add the task to episode metadata, or override only if all episodes share one task |
-| Missing `joint_names` | Restore the recording schema; use legacy ordering only for verified legacy ACT data |
-| Video decode/frame-count error | Check each camera video has the same number of frames as NPZ timesteps |
-| Output directory must be empty/new | Choose a new output directory, or resume the existing run's `policy_last.ckpt` |
-| Out of memory | Start a new run with a smaller batch size |
-| Worker process fails | Retry with `--num_workers 0` |
-| Dataset fingerprint mismatch | Restore the original bytes, or use fine-tuning for a changed dataset |
-| Model/tokenizer download fails | Check network access and the Hugging Face cache |
-| Dashboard `cv2.imshow` fails | Use GUI-enabled OpenCV and a desktop recording environment |
-| Validation loss rises while train loss falls | Inspect the unsmoothed validation curve; evaluate the best and final checkpoints separately |
-| Robot success rate is absent from JSON | Score trials separately; the environment does not infer task success |
-
-For published results, preserve the training configuration, history, checkpoint identity, and evaluation JSON alongside the figures. Report the episode split, seed, budget, action horizon, metric units, and rollout denominators so results remain interpretable.

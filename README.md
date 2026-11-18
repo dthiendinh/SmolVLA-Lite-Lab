@@ -1,305 +1,223 @@
 # SmolVLA-Lite-Lab
 
-SmolVLA tự triển khai cho SO-ARM101: **chuẩn bị dữ liệu → chạy thử 1 epoch → train chính → đánh giá offline → rollout**.
+**An educational SmolVLA implementation with a complete training and evaluation workflow for SO-ARM101.**
 
-Lệnh chính: `python -B -m smolvla_scratch.train_infer`. Chạy tất cả lệnh bên dưới từ thư mục gốc repo.
+This project connects dual-camera observations, a language instruction, and robot joint state to chunked action prediction. It includes demonstration recording, episodic data loading, flow-matching training, checkpoint recovery, offline action evaluation, and a real-robot rollout interface.
 
-Train mới sẽ tải backbone `HuggingFaceTB/SmolVLM2-500M-Video-Instruct`, đóng băng VLM và train action expert cùng các lớp projection. Expert được khởi tạo mới. Repo chưa hỗ trợ nạp trực tiếp policy `lerobot/smolvla_base`; `--resume` và `--finetune` dùng checkpoint do repo này tạo.
+[Training guide](docs/training_guide/README.md) · [Experiment configuration](docs/evaluation/pick_place_final/training_config.json) · [Training history](docs/evaluation/pick_place_final/history.json) · [Offline results](docs/evaluation/pick_place_final/policy_best.eval.json)
 
-## 1. Chuẩn bị môi trường
+## Model architecture
 
-Lần đầu, tạo môi trường Python 3.12 và cài dependency:
+<table>
+  <tr>
+    <td align="center">
+      <strong>Model architecture</strong><br>
+      <em>Architecture figure to be added.</em>
+      <!-- Replace this cell's placeholder text with:
+      <img src="docs/assets/model_architecture.png" alt="SmolVLA-Lite-Lab architecture" width="100%">
+      -->
+    </td>
+  </tr>
+</table>
+
+Front and wrist images and the instruction provide visual-language context through a frozen, pretrained **SmolVLM2-500M-Video-Instruct** backbone. A trainable action expert uses this context, projected robot state, noisy actions, and a flow timestep to predict action velocities. At inference, Euler integration transforms Gaussian noise into an action chunk, which is denormalized into six robot joint targets.
+
+The reported configuration uses one observation timestep, a **50-step action chunk**, and **10 Euler steps**. State and action vectors contain six physical dimensions and are padded internally to 32 dimensions. Padding is excluded from the training objective.
+
+**Initialization:** the VLM starts from pretrained weights; the action expert and projection layers are initialized for this project. The reported run trains these action components while freezing the VLM. Direct loading of the official `lerobot/smolvla_base` policy is not implemented; `--finetune` and `--resume` accept this repository's local checkpoints.
+
+## Training metrics
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <strong>Training loss by epoch</strong><br>
+      <em>Figure to be added.</em>
+      <!-- <img src="docs/assets/metrics/train_epoch.png" alt="Training flow loss by optimizer step" width="100%"> -->
+    </td>
+    <td align="center" width="50%">
+      <strong>Validation loss by epoch</strong><br>
+      <em>Figure to be added.</em>
+      <!-- <img src="docs/assets/metrics/val_epoch.png" alt="Validation flow loss by optimizer step" width="100%"> -->
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <strong>Training loss by update</strong><br>
+      <em>Figure to be added.</em>
+      <!-- <img src="docs/assets/metrics/train_step.png" alt="Training flow loss per logged update" width="100%"> -->
+    </td>
+    <td align="center">
+      <strong>Best validation loss</strong><br>
+      <em>Figure to be added.</em>
+      <!-- <img src="docs/assets/metrics/best_val.png" alt="Running minimum of validation flow loss" width="100%"> -->
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <strong>Learning rate</strong><br>
+      <em>Figure to be added.</em>
+      <!-- <img src="docs/assets/metrics/learning_rate.png" alt="Learning rate used at each logged update" width="100%"> -->
+    </td>
+    <td align="center">
+      <strong>Gradient norm before clipping</strong><br>
+      <em>Figure to be added.</em>
+      <!-- <img src="docs/assets/metrics/grad_norm.png" alt="Gradient norm before clipping" width="100%"> -->
+    </td>
+  </tr>
+</table>
+
+*Figures: TensorBoard scalars from `pick_place_final`. The horizontal axis is optimizer updates, including for epoch-level loss points. When exporting screenshots, retain the raw traces and state the smoothing setting. `loss/best_val` is a running minimum; its flat region means no new best checkpoint was found.*
+
+### Experiment setup
+
+| Setting | Reported run |
+| --- | --- |
+| Run | `pick_place_final` |
+| Robot | SO-ARM101, six joint targets including gripper |
+| Task instruction | “Pick up an orange marker and put it in the cup” |
+| Dataset | `pick_place_smolvla_v1`, 54 demonstration episodes |
+| Split | 43 training episodes / 11 validation episodes; split by episode |
+| Training / validation observation timesteps | 23,516 / 5,621 |
+| Cameras | Front and wrist; recorded at 640 × 480, resized with padding to 512 × 512 |
+| Normalization | Per-dimension state/action mean and standard deviation from training episodes only |
+| Training budget | 30 epochs, 735 updates per epoch, 22,050 updates total |
+| Batch size / data-loader workers | 32 / 4 |
+| Optimizer | AdamW; betas `(0.9, 0.95)`, weight decay `1e-10` |
+| Learning rate | Peak `1e-4`, warmup followed by cosine decay, floor `2.5e-6` |
+| Gradient clipping | Maximum norm 10 |
+| Chunk / executed actions per prediction / Euler steps | 50 / 50 / 10 |
+| Training device / seed | CUDA / 0 |
+| Checkpoint selection | Lowest validation flow-matching loss, evaluated after each epoch |
+
+This is a single-seed experiment. Validation episodes are used for checkpoint selection; they are not an independent test set. Exact recorded arguments, policy configuration, split membership, and normalization statistics are available in the [experiment configuration](docs/evaluation/pick_place_final/training_config.json).
+
+### Learning behavior and checkpoint selection
+
+| Checkpoint | Completed epochs | Optimizer updates | Training flow loss | Validation flow loss |
+| --- | ---: | ---: | ---: | ---: |
+| Best: `policy_best.ckpt` | 2 | 1,470 | 0.174946 | **0.264660** |
+| Final: `policy_last_model.ckpt` | 30 | 22,050 | **0.009723** | 0.637668 |
+
+Training loss continues to decrease after the best validation checkpoint, while validation loss trends upward. This divergence is consistent with overfitting under the recorded validation procedure. The lowest training loss therefore does not identify the best checkpoint for held-out imitation. `policy_best.ckpt` is the checkpoint selected for the offline results below.
+
+Training loss averages batches while weights change throughout an epoch; validation uses fixed weights, evaluation mode, and seeded noise/time. Both flow-loss summaries are arithmetic means of batch losses. Their absolute gap is not a measurement under identical conditions, and the curves alone do not establish the cause of the degradation or predict robot success.
+
+### Offline action evaluation
+
+The selected checkpoint is evaluated on all **5,621 validation observations**, using its saved split, instructions, normalization, and validation seed 0. Each observation predicts a 50-step chunk. End-of-episode padding is excluded, leaving **267,575 valid chunk timesteps**, including overlapping predictions of the same recorded trajectory timesteps.
+
+| Metric | Best-checkpoint evaluation |
+| --- | ---: |
+| Flow-matching loss | 0.264907 |
+| Aggregate action MSE, original joint scales | 161.216711 |
+| Aggregate action MAE, original joint scales | 8.578988 |
+| Checkpoint epoch index | 1, equivalent to 2 completed epochs |
+
+The standalone evaluation records flow loss **0.264907**; the training history records **0.264660** at selection. These are retained as separate measurements from the supplied artifacts. Action errors are computed after Euler sampling and denormalization, whereas flow loss measures velocity prediction in normalized space.
+
+| Joint | Action MAE ↓ | Action MSE ↓ | MAE unit |
+| --- | ---: | ---: | --- |
+| Shoulder pan | 6.1126 | 78.1199 | Degrees |
+| Shoulder lift | 10.0316 | 174.9502 | Degrees |
+| Elbow flex | 9.8836 | 172.0271 | Degrees |
+| Wrist flex | 12.8197 | 304.5410 | Degrees |
+| Wrist roll | 8.6364 | 182.7939 | Degrees |
+| Gripper | 3.9900 | 54.8682 | LeRobot gripper position scale |
+
+MSE uses the square of each joint's unit. The aggregate action metrics average arm and gripper errors on different scales, so they do not have a single physical unit. Per-joint results provide the more interpretable comparison. Wrist flex has the largest angular MAE in this evaluation; further rollout analysis is needed to determine how this affects reaching, grasping, and placement.
+
+Offline action errors measure imitation on recorded observations. They do not measure closed-loop recovery, motion initiation, or task completion.
+
+## Real-robot evaluation
+
+**Status: structured rollout evaluation and videos to be added.**
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <strong>Nominal pick-and-place</strong><br>
+      <em>Robot rollout video to be added.</em>
+      <!-- Replace with a clickable video thumbnail after uploading the video:
+      <a href="VIDEO_URL"><img src="docs/assets/rollouts/nominal_thumbnail.jpg" alt="Watch nominal pick-and-place rollout" width="100%"></a>
+      -->
+    </td>
+    <td align="center" width="50%">
+      <strong>Failure analysis / varied object placement</strong><br>
+      <em>Robot rollout video to be added.</em>
+      <!-- <a href="VIDEO_URL"><img src="docs/assets/rollouts/variation_thumbnail.jpg" alt="Watch rollout under varied object placement" width="100%"></a> -->
+    </td>
+  </tr>
+</table>
+
+### Planned protocol
+
+Use the selected checkpoint and the same instruction, calibration, camera placement, and reset procedure as the recorded task. Define trial count, object/cup starting positions, time limit, and the motion-initiation threshold before collecting results. Evaluate every planned trial and record unsuccessful attempts as well as successes.
+
+A successful trial requires the robot to grasp the marker and release it into the cup within the declared time limit without human assistance. Report motion initiation, grasping, and placement separately so that an arm remaining near its reset pose is visible in the results.
+
+| Condition | Checkpoint | Trials | Motion initiation | Grasp success | Task success | Completion time, successful trials |
+| --- | --- | --- | --- | --- | --- | --- |
+| Nominal setup | Best | Pending | Pending | Pending | Pending | Pending |
+| Nominal setup | Final | Pending | Pending | Pending | Pending | Pending |
+| Varied marker starting positions | Best | Pending | Pending | Pending | Pending | Pending |
+
+Report each rate as `count / total trials (%)`; keep the denominator explicit. Add a confidence interval for task success and report the median completion time over successful trials. Record failures such as no initiation, missed grasp, dropped object, missed placement, timeout, or human intervention. The rollout CLI currently writes step counts and optional returns; success labels and videos must be recorded separately.
+
+## Usage
+
+See the **[English training guide](docs/training_guide/README.md)** for installation, demonstration recording, dataset format, a smoke test, training, TensorBoard, checkpoint selection, resume, fine-tuning, offline evaluation, and robot rollout.
+
+After installing dependencies, the common entry point is:
 
 ```bash
-cd /Users/tt/Documents/GitHub/SmolVLA-Lite-Lab
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-```
-
-Requirements hiện ghim PyTorch `2.11.0`, Transformers `5.22.2` và LeRobot `0.6.1`. Lần train đầu cần mạng để tải backbone/config/tokenizer; những lần sau có thể dùng cache.
-
-Mỗi lần mở terminal mới, chỉ cần:
-
-```bash
-cd /Users/tt/Documents/GitHub/SmolVLA-Lite-Lab
-source .venv/bin/activate
-```
-
-Kiểm tra môi trường và danh sách tham số, chưa train hoặc kết nối robot:
-
-```bash
-python -c 'import sys, torch, lerobot; print(sys.executable); print(torch.__version__); print(lerobot.__file__)'
 python -B -m smolvla_scratch.train_infer --help
 ```
 
-Nếu dùng env cũ có file `smolvla_local_sources.pth`, bỏ liên kết source cũ để dùng LeRobot cài trong env:
+To evaluate a local trained checkpoint:
 
 ```bash
-rm -f .venv/lib/python3.12/site-packages/smolvla_local_sources.pth
-```
-
-**Chỉ khi cần dashboard thu dữ liệu:** dashboard dùng `cv2.imshow`, cần OpenCV có GUI. Kiểm tra các biến thể đang cài:
-
-```bash
-python -m pip list | python -c 'import sys; print("".join(line for line in sys.stdin if "opencv" in line.lower()))'
-```
-
-Nếu cả `opencv-python` và `opencv-python-headless` cùng có mặt, cài lại một biến thể có GUI:
-
-```bash
-python -m pip uninstall -y opencv-python opencv-python-headless
-python -m pip install 'opencv-python>=4.10,<4.14'
-```
-
-LeRobot yêu cầu bản headless trong metadata nên `python -m pip check` có thể báo thiếu gói đó sau khi thay bằng bản GUI. Cài lại requirements có thể đưa bản headless trở lại.
-
-## 2. Chuẩn bị dataset
-
-Nếu đã có dữ liệu đúng định dạng, chuyển sang bước 3. **Train và đánh giá offline không cần cắm robot.**
-
-Muốn thu dữ liệu mới, đặt cổng USB, calibration ID và camera trong [`low_control/hardware_constant.py`](low_control/hardware_constant.py) theo phần cứng đã setup/calibrate, rồi chạy:
-
-```bash
-python -B -m data_recording.record_teleop_data \
-  --data-dir pick_place_smolvla_v1 \
-  --task "Pick up the block"
-```
-
-Trong cửa sổ dashboard: `t` sửa task tiếng Anh → Enter xác nhận → `r` bắt đầu ghi → `s` lưu episode. `x` bỏ episode, `q` thoát. Thu một lần thực hiện task hoàn chỉnh cho mỗi episode; kiểm tra cả hai camera và kết quả thao tác trước khi đưa vào train.
-
-Dataset mẫu dùng xuyên suốt README:
-
-```text
-data_recording/data/pick_place_smolvla_v1/
-├── episode_0000/
-│   ├── data.npz
-│   ├── front.mp4
-│   ├── wrist.mp4
-│   └── metadata.json
-├── episode_0001/
-│   └── ...
-└── ...
-```
-
-Yêu cầu loader:
-
-- Ít nhất **2 episode** để tách train/validation. Đây là mức tối thiểu để chạy code, chưa đủ để kết luận chất lượng policy.
-- `data.npz` có `states`, `actions` dạng `(T, 6)` và `joint_names`; `timestamps`, nếu có, phải tăng nghiêm ngặt và có `T` phần tử.
-- Mỗi camera có đúng `T` frame; độ phân giải của từng camera phải nhất quán giữa các episode và hai split.
-- `metadata.json` có instruction không rỗng, ví dụ `{"task": "Pick up the block"}`. Mặc định trainer đọc task riêng của từng episode.
-
-Thứ tự 6 khớp chuẩn:
-
-```text
-shoulder_pan.pos, shoulder_lift.pos, elbow_flex.pos,
-wrist_flex.pos, wrist_roll.pos, gripper.pos
-```
-
-Loader sắp lại cột theo `joint_names`. Năm khớp thân dùng độ; gripper dùng thang riêng của LeRobot. Giữ cùng calibration, đơn vị đo và cách bố trí camera khi thu và rollout.
-
-Nếu dữ liệu cũ thiếu task, thêm `--task "Pick up the block"` vào lệnh train. Option này **ghi đè instruction của mọi episode**, nên chỉ dùng khi toàn bộ dataset cùng task. Chỉ thêm `--legacy_joint_order` cho recording ACT cũ thiếu `joint_names` và thực sự lưu cột theo `sorted(joint_keys)`.
-
-## 3. Chạy thử 1 epoch
-
-Kiểm tra trọn luồng đọc dữ liệu, tải backbone, tính loss và lưu checkpoint:
-
-```bash
-python -B -m smolvla_scratch.train_infer \
-  --dataset_dir ../data/pick_place_smolvla_v1 \
-  --ckpt_dir outputs/pick_place_smoke \
-  --batch_size 4 \
-  --num_epochs 1 \
-  --chunk_size 50 \
-  --lr 1e-4 \
-  --seed 0 \
-  --num_workers 0 \
-  --device cuda
-```
-
-Dùng thư mục output mới hoặc rỗng. Nếu đã chạy thử vào thư mục trên, đổi tên thư mục cho lần thử tiếp theo.
-
-`--device auto` chọn **CUDA → MPS → CPU** theo khả năng máy. Có thể chỉ định `--device mps` trên Mac hỗ trợ MPS, `--device cuda` trên máy NVIDIA có CUDA, hoặc `--device cpu`.
-
-Chạy thử thành công khi hoàn tất 1 epoch và có `outputs/pick_place_smoke/policy_last.ckpt`. Checkpoint này chỉ phục vụ kiểm tra luồng; bước tiếp theo train một run mới.
-
-## 4. Train chính
-
-```bash
-python -B -m smolvla_scratch.train_infer \
+python -B -m smolvla_scratch.train_infer --eval \
   --dataset_dir data_recording/data/pick_place_smolvla_v1 \
-  --ckpt_dir outputs/pick_place_run1 \
-  --camera_names front wrist \
-  --batch_size 4 \
-  --num_epochs 100 \
-  --chunk_size 50 \
-  --lr 1e-4 \
-  --val_ratio 0.2 \
-  --seed 0 \
-  --num_workers 0 \
-  --save_every 10 \
+  --checkpoint outputs/pick_place_final/policy_best.ckpt \
   --device auto
 ```
 
-Đổi `--dataset_dir` nếu dữ liệu nằm ở nơi khác. Nếu thiếu bộ nhớ, giảm `--batch_size 4` xuống `1` và chạy lại vào thư mục mới. Các giá trị trên là cấu hình khởi đầu; cần đánh giá trên dữ liệu và task thực tế.
+Dataset and checkpoint files must be supplied locally. The small experiment records linked above document the reported run; they do not include the model weights or demonstration videos.
 
-| Tham số | Ý nghĩa |
+## Implementation map
+
+| Path | Purpose |
 | --- | --- |
-| `--dataset_dir` | Thư mục chứa các `episode_*` |
-| `--ckpt_dir` | Nơi lưu run; train mới/fine-tune cần thư mục mới hoặc rỗng |
-| `--batch_size 4` | Số timestep mẫu trong mỗi batch |
-| `--num_epochs 100` | Tổng số epoch mục tiêu |
-| `--chunk_size 50` | Mỗi mẫu học dự đoán 50 action liên tiếp từ timestep hiện tại |
-| `--lr 1e-4` | Peak learning rate; CLI yêu cầu LR hữu hạn và ≥ `2.5e-6` |
-| `--val_ratio 0.2` | Tách khoảng 20% episode cho validation, ít nhất 1 episode |
-| `--seed 0` | Seed cho split, khởi tạo, shuffle và noise |
-| `--num_workers 0` | Đọc dữ liệu trong tiến trình chính |
-| `--save_every 10` | Lưu thêm full checkpoint định kỳ mỗi 10 epoch |
-| `--log_every 10` | Ghi train loss, LR và gradient norm lên TensorBoard mỗi 10 update |
-| `--num_episodes N` | Tùy chọn: chỉ lấy N thư mục episode đầu theo tên đã sắp xếp |
+| `smolvla_scratch/models/` | VLM/expert integration, attention, flow matching, and policy action queue |
+| `smolvla_scratch/configuration/` | Model, optimizer, and scheduler configuration |
+| `smolvla_scratch/data_process/` | Observation preprocessing and action postprocessing |
+| `smolvla_scratch/utils/vla_utils.py` | Episodic dataset and shared utilities |
+| `smolvla_scratch/train_infer.py` | Training, offline evaluation, and rollout entry point |
+| `smolvla_scratch/checkpointing.py` | Model/training checkpoints and recovery state |
+| `smolvla_scratch/training_logging.py` | TensorBoard logging |
+| `data_recording/` | Leader–follower teleoperation and recording |
+| `low_control/` | Hardware configuration and robot environment |
+| `docs/` | Usage documentation, evaluation records, and figure/video assets |
 
-Loader tách **theo episode** và chỉ tính normalization từ train split. Một epoch đi qua các timestep của train split; mỗi mẫu gồm ảnh/state tại `t`, instruction và action từ `t` đến `t + chunk_size - 1`. Phần action vượt cuối episode được padding và loại khỏi loss.
+## Current scope
 
-Khi bắt đầu, trainer kiểm tra dữ liệu và tính SHA-256 cho NPZ/video để phục vụ resume; bước này có thể mất thời gian. Khi train, theo dõi `train`, `val`, `best` trên thanh tiến độ. Best model được chọn bằng validation flow loss thấp nhất.
+The reported evidence covers one task, one dataset split, and one training seed. Broader task generalization and independent test-set performance have not been measured. The robot runner executes action chunks synchronously and does not establish a sustained 30 Hz closed-loop rate. Guided RTC is not supported by this rollout entry point. No automatic task-success detector is implemented.
 
-## 5. Đọc kết quả và chọn checkpoint
+## References and acknowledgments
 
-```text
-outputs/pick_place_run1/
-├── training_config.json
-├── history.json
-├── tensorboard/
-├── policy_best.ckpt
-├── policy_last.ckpt
-├── policy_last_model.ckpt
-├── policy_epoch_9_seed_0.ckpt
-└── ...
-```
+This project follows the SmolVLA design and adapts components from LeRobot for learning and experimentation.
 
-| File | Khi lưu / cách dùng |
-| --- | --- |
-| `policy_best.ckpt` | Model có validation loss thấp nhất; dùng cho eval, rollout hoặc fine-tune |
-| `policy_last.ckpt` | Cuối mỗi epoch; chứa model, optimizer, scheduler, RNG, history và best snapshot để resume |
-| `policy_last_model.ckpt` | Model cuối cùng, chỉ xuất khi train kết thúc bình thường; dùng cho eval/fine-tune |
-| `policy_epoch_<index>_seed_<seed>.ckpt` | Full checkpoint định kỳ để resume từ mốc cũ; index bắt đầu từ 0, nên `epoch_9` nghĩa là đã xong 10 epoch |
-| `history.json` | Train loss, validation loss, LR và global step theo epoch |
-| `training_config.json` | Cấu hình model, dataset, split và stats của run |
+- [SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics](https://arxiv.org/abs/2506.01844) — Shukor et al., 2025.
+- [Hugging Face LeRobot](https://github.com/huggingface/lerobot) — reference implementation and robot interfaces.
+- [SmolVLM2-500M-Video-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM2-500M-Video-Instruct) — pretrained visual-language backbone.
 
-Trainer ghi biểu đồ trực tiếp vào TensorBoard trong lúc train, thay cho ảnh loss PNG cuối run. Cài dependency mới vào môi trường đang dùng:
-
-```bash
-python -m pip install 'tensorboard>=2.20,<3'
-```
-
-Giữ lệnh train của bạn như cũ (ví dụ `--batch_size 32`). Mở terminal thứ hai tại gốc repo, kích hoạt cùng môi trường và chạy:
-
-```bash
-tensorboard --logdir outputs --reload_interval 5 --port 6006
-```
-
-Mở [TensorBoard](http://localhost:6006). `Scalars` có train loss mỗi 10 update, learning rate thực dùng và gradient norm trước khi clip. `Custom Scalars` → `Loss` → `Train vs validation` đặt train/val loss trung bình epoch lên cùng biểu đồ. Trục ngang là số optimizer update; `progress/epoch` cho biết số epoch đã hoàn tất. Validation loss cập nhật sau mỗi epoch; train loss theo step có từ epoch đầu. Log được flush mỗi khoảng 10 giây và sau mỗi epoch, không cần chờ train xong. Có thể thêm `--log_every 1` để ghi mỗi update.
-
-Mỗi run có log riêng tại `<ckpt_dir>/tensorboard/`; `--logdir outputs` xem được nhiều run. Nếu `ckpt_dir` nằm ngoài `outputs`, đổi `--logdir` sang thư mục chứa run đó. Resume tiếp tục đúng global step và ẩn log thuộc phần epoch chưa được checkpoint. Nếu resume checkpoint cũ chưa có event files hoặc resume sang thư mục mới, trainer khôi phục biểu đồ theo epoch từ history trong checkpoint; các điểm theo step cũ không thể khôi phục.
-
-Mọi checkpoint model đều chứa cả backbone và expert; full checkpoint lớn hơn vì có trạng thái training và best snapshot. `--save_every` chỉ điều khiển checkpoint định kỳ: `policy_last.ckpt` vẫn được lưu **mỗi epoch**.
-
-## 6. Resume khi train bị ngắt
-
-Tiếp tục run từ cuối epoch đã lưu gần nhất:
-
-```bash
-python -B -m smolvla_scratch.train_infer \
-  --resume outputs/pick_place_run1/policy_last.ckpt \
-  --device auto
-```
-
-Không cần nhập lại dataset, batch size, LR hoặc split: trainer khôi phục chúng từ checkpoint. Nếu bị ngắt giữa epoch thì phần epoch chưa hoàn tất được chạy lại. Chỉ có checkpoint sau khi hoàn tất ít nhất một epoch.
-
-Nếu run đã hoàn tất 100 epoch và muốn chạy tới **tổng 120 epoch**:
-
-```bash
-python -B -m smolvla_scratch.train_infer \
-  --resume outputs/pick_place_run1/policy_last.ckpt \
-  --num_epochs 120 \
-  --device auto
-```
-
-Lệnh này chạy thêm 20 epoch. Scheduler giữ kế hoạch LR gốc; sau horizon cũ, LR giữ ở floor, không warmup lại. Muốn đổi LR, batch size, task hoặc dataset thì dùng fine-tune ở bước 7.
-
-Resume yêu cầu nội dung NPZ/video không đổi; có thể chuyển nguyên dataset bằng `--dataset_dir`. Muốn resume checkpoint định kỳ cũ, truyền checkpoint đó qua `--resume` và thêm `--ckpt_dir` trỏ tới thư mục mới/rỗng. Chỉ resume từ chính `policy_last.ckpt` của thư mục đích mới được ghi tiếp vào thư mục có sẵn.
-
-## 7. Fine-tune với dữ liệu mới
-
-Dùng weights đã học để tạo run mới:
-
-```bash
-python -B -m smolvla_scratch.train_infer \
-  --finetune outputs/pick_place_run1/policy_best.ckpt \
-  --dataset_dir data_recording/data/pick_place_smolvla_v2 \
-  --ckpt_dir outputs/pick_place_finetune1 \
-  --batch_size 4 \
-  --num_epochs 50 \
-  --lr 1e-5 \
-  --device auto
-```
-
-Chuẩn bị dataset `pick_place_smolvla_v2` trước khi chạy. Fine-tune nạp weights/config nguồn, tạo optimizer và scheduler mới, bắt đầu epoch 0 và chọn best model lại. Camera, backbone và chunk size phải khớp checkpoint; task đọc từ metadata của dataset mới hoặc từ `--task`.
-
-Mặc định giữ normalization của checkpoint (`--finetune_stats checkpoint`). Chỉ thêm `--finetune_stats dataset` khi chủ động muốn tính lại stats trên train split mới, vì thay stats sẽ đổi cách model diễn giải state và action.
-
-## 8. Đánh giá offline
-
-```bash
-python -B -m smolvla_scratch.train_infer \
-  --eval \
-  --dataset_dir data_recording/data/pick_place_smolvla_v1 \
-  --checkpoint outputs/pick_place_run1/policy_best.ckpt \
-  --device auto
-```
-
-Eval dùng lại validation split, task và normalization trong checkpoint; dữ liệu validation phải khớp nội dung đã lưu fingerprint. Kết quả in ra terminal và lưu vào:
-
-```text
-outputs/pick_place_run1/policy_best.eval.json
-```
-
-`flow_loss` là loss flow matching. `action_mse`, `action_mae` và `per_joint` đo sai số action sau denoise và đổi về đơn vị dữ liệu gốc, bỏ padding. Đây là đánh giá imitation offline; tỷ lệ hoàn thành task cần đo bằng rollout thực tế.
-
-Đánh giá run fine-tune thì đổi sang dataset `pick_place_smolvla_v2` và checkpoint trong `outputs/pick_place_finetune1`.
-
-## 9. Rollout trên robot
-
-Rollout kết nối và di chuyển follower thật. Trước khi chạy, kiểm tra port, calibration ID, hai camera và `RESET_POSE` trong `low_control/hardware_constant.py` phù hợp với robot của mình; dừng chương trình thu dữ liệu để giải phóng port/camera.
-
-```bash
-python -B -m smolvla_scratch.train_infer \
-  --rollout \
-  --checkpoint outputs/pick_place_run1/policy_best.ckpt \
-  --task "Pick up the block" \
-  --episode_len 300 \
-  --num_rollouts 1 \
-  --device auto
-```
-
-Đặt instruction đúng task đã học; với checkpoint nhiều task cần chọn task cụ thể bằng `--task`. Có thể dùng `--env_kwargs path/to/env.json` để truyền `port`, `robot_id`, `reset_pose`, `max_relative_target` và `dt` khác mặc định. Camera phải khớp checkpoint.
-
-Rollout chạy đồng bộ qua hàng đợi action; khi sinh chunk mới vẫn chờ inference, chưa đảm bảo 30 Hz và CLI hiện từ chối checkpoint bật guided RTC. `--n_action_steps` quy định số action thực thi trước khi lấy chunk mới, mặc định bằng `chunk_size`; `--num_euler_steps` quy định số bước denoise, mặc định 10. Khi eval/rollout, các giá trị này được lấy từ config checkpoint.
-
-Kết quả lưu cạnh checkpoint thành `policy_best.rollout.json`. Môi trường chưa có reward/task-success detector, nên `return` có thể là `null`.
-
-## Lỗi thường gặp
-
-| Hiện tượng | Cách xử lý |
-| --- | --- |
-| Không import được module | Kích hoạt đúng env, cài requirements và chạy từ gốc repo |
-| `Need at least two episodes` | Chuẩn bị ít nhất 2 episode hợp lệ |
-| `missing task` | Bổ sung task vào metadata, hoặc dùng `--task` nếu cả dataset cùng task |
-| `missing joint_names` | Kiểm tra nguồn recording; chỉ dùng `--legacy_joint_order` với đúng định dạng ACT cũ |
-| Video lỗi hoặc số frame không khớp | Kiểm tra đủ `front.mp4`, `wrist.mp4` và số frame bằng số mẫu NPZ |
-| `--ckpt_dir must be empty/new` | Đổi thư mục cho run mới; dùng `--resume` để tiếp tục run cũ |
-| Thiếu bộ nhớ | Giảm batch size xuống 1; nếu đổi chunk size thì tạo run mới |
-| Resume báo dataset đã thay đổi | Khôi phục dataset gốc, hoặc dùng `--finetune` cho dữ liệu mới |
-| Không tải được model/tokenizer | Kiểm tra mạng hoặc cache; resume/eval vẫn cần config/tokenizer dù weights đã có trong checkpoint |
-| Dashboard lỗi `cv2.imshow` | Kiểm tra bản OpenCV có GUI như bước 1 |
-
-Chi tiết cơ chế checkpoint, resume và fine-tune: [`docs/TRAINING_VI.md`](docs/TRAINING_VI.md).
+<!--
+MAINTAINER NOTES
+1. Add images under docs/assets/ and replace each visible placeholder with its commented <img> element.
+2. Export the six distinct TensorBoard plots; only one learning-rate screenshot is needed.
+3. Keep optimizer update numbers visible and record the TensorBoard smoothing setting.
+4. Upload rollout videos to GitHub attachments or a video host, then replace VIDEO_URL and add thumbnails.
+5. Fill the robot results only after trials are complete. Include checkpoint, trial counts, and failure outcomes.
+6. The JSON files under docs/evaluation/pick_place_final/ are unchanged copies of the supplied run records.
+-->
