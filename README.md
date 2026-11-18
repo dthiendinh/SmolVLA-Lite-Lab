@@ -105,8 +105,7 @@ deterioration in generated actions or closed-loop task performance.
 | Metric | Meaning |
 | --- | --- |
 | FLow-matching validation loss |  velocity-prediction error on noise-corrupted demonstration actions |
-| Hold-out action error | the discrepancy between demonstrated actions and action chunks
-generated |
+| Hold-out action error | discrepancy between demonstrated actions and action chunks generated |
 
 ## Real-robot evaluation
 
