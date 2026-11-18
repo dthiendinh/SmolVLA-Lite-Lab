@@ -2,7 +2,7 @@
 
 **An educational SmolVLA implementation with a complete training and evaluation workflow for SO-ARM101.**
 
-This project connects dual-camera observations, a language instruction, and robot joint state to chunked action prediction. It includes demonstration recording, episodic data loading, flow-matching training, checkpoint recovery, offline action evaluation, and a real-robot rollout interface.
+This project connects dual-camera observations, a language instruction, and robot joint state to chunked action prediction. It includes demonstration recording (teleoperation, recording dashboard), episodic data loading, flow-matching training, checkpoint recovery, offline action evaluation, and a real-robot rollout interface.
 
 [Training guide](docs/training_guide/README.md) · [Experiment configuration](docs/evaluation/pick_place_final/training_config.json) · [Training history](docs/evaluation/pick_place_final/history.json) · [Offline results](docs/evaluation/pick_place_final/policy_best.eval.json)
 
@@ -12,10 +12,7 @@ This project connects dual-camera observations, a language instruction, and robo
   <tr>
     <td align="center">
       <strong>Model architecture</strong><br>
-      <em>Architecture figure to be added.</em>
-      <!-- Replace this cell's placeholder text with:
-      <img src="docs/assets/model_architecture.png" alt="SmolVLA-Lite-Lab architecture" width="100%">
-      -->
+      <img src="docs/model_architecture/model_architecture.png" alt="SmolVLA-Lite-Lab architecture" width="100%">
     </td>
   </tr>
 </table>
@@ -32,37 +29,31 @@ The reported configuration uses one observation timestep, a **50-step action chu
   <tr>
     <td align="center" width="50%">
       <strong>Training loss by epoch</strong><br>
-      <em>Figure to be added.</em>
-      <!-- <img src="docs/assets/metrics/train_epoch.png" alt="Training flow loss by optimizer step" width="100%"> -->
+      <img src="docs/assets/metrics/train_epoch.png" alt="Training flow loss by optimizer step" width="100%">
     </td>
     <td align="center" width="50%">
       <strong>Validation loss by epoch</strong><br>
-      <em>Figure to be added.</em>
-      <!-- <img src="docs/assets/metrics/val_epoch.png" alt="Validation flow loss by optimizer step" width="100%"> -->
+      <img src="docs/assets/metrics/val_epoch.png" alt="Validation flow loss by optimizer step" width="100%">
     </td>
   </tr>
   <tr>
     <td align="center">
       <strong>Training loss by update</strong><br>
-      <em>Figure to be added.</em>
-      <!-- <img src="docs/assets/metrics/train_step.png" alt="Training flow loss per logged update" width="100%"> -->
+      <img src="docs/assets/metrics/train_step.png" alt="Training flow loss per logged update" width="100%">
     </td>
     <td align="center">
       <strong>Best validation loss</strong><br>
-      <em>Figure to be added.</em>
-      <!-- <img src="docs/assets/metrics/best_val.png" alt="Running minimum of validation flow loss" width="100%"> -->
+      <img src="docs/assets/metrics/best_val.png" alt="Running minimum of validation flow loss" width="100%">
     </td>
   </tr>
   <tr>
     <td align="center">
       <strong>Learning rate</strong><br>
-      <em>Figure to be added.</em>
-      <!-- <img src="docs/assets/metrics/learning_rate.png" alt="Learning rate used at each logged update" width="100%"> -->
+      <img src="docs/assets/metrics/learning_rate.png" alt="Learning rate used at each logged update" width="100%">
     </td>
     <td align="center">
       <strong>Gradient norm before clipping</strong><br>
-      <em>Figure to be added.</em>
-      <!-- <img src="docs/assets/metrics/grad_norm.png" alt="Gradient norm before clipping" width="100%"> -->
+      <img src="docs/assets/metrics/grad_norm.png" alt="Gradient norm before clipping" width="100%">
     </td>
   </tr>
 </table>
@@ -73,10 +64,9 @@ The reported configuration uses one observation timestep, a **50-step action chu
 
 | Setting | Reported run |
 | --- | --- |
-| Run | `pick_place_final` |
 | Robot | SO-ARM101, six joint targets including gripper |
 | Task instruction | “Pick up an orange marker and put it in the cup” |
-| Dataset | `pick_place_smolvla_v1`, 54 demonstration episodes |
+| Dataset | 54 demonstration episodes |
 | Split | 43 training episodes / 11 validation episodes; split by episode |
 | Training / validation observation timesteps | 23,516 / 5,621 |
 | Cameras | Front and wrist; recorded at 640 × 480, resized with padding to 512 × 512 |
@@ -87,47 +77,36 @@ The reported configuration uses one observation timestep, a **50-step action chu
 | Learning rate | Peak `1e-4`, warmup followed by cosine decay, floor `2.5e-6` |
 | Gradient clipping | Maximum norm 10 |
 | Chunk / executed actions per prediction / Euler steps | 50 / 50 / 10 |
-| Training device / seed | CUDA / 0 |
-| Checkpoint selection | Lowest validation flow-matching loss, evaluated after each epoch |
+| Training device / seed | RTX 5090 (CUDA) / 0 |
 
 This is a single-seed experiment. Validation episodes are used for checkpoint selection; they are not an independent test set. Exact recorded arguments, policy configuration, split membership, and normalization statistics are available in the [experiment configuration](docs/evaluation/pick_place_final/training_config.json).
-
-### Learning behavior and checkpoint selection
-
-| Checkpoint | Completed epochs | Optimizer updates | Training flow loss | Validation flow loss |
-| --- | ---: | ---: | ---: | ---: |
-| Best: `policy_best.ckpt` | 2 | 1,470 | 0.174946 | **0.264660** |
-| Final: `policy_last_model.ckpt` | 30 | 22,050 | **0.009723** | 0.637668 |
-
-Training loss continues to decrease after the best validation checkpoint, while validation loss trends upward. This divergence is consistent with overfitting under the recorded validation procedure. The lowest training loss therefore does not identify the best checkpoint for held-out imitation. `policy_best.ckpt` is the checkpoint selected for the offline results below.
-
-Training loss averages batches while weights change throughout an epoch; validation uses fixed weights, evaluation mode, and seeded noise/time. Both flow-loss summaries are arithmetic means of batch losses. Their absolute gap is not a measurement under identical conditions, and the curves alone do not establish the cause of the degradation or predict robot success.
 
 ### Offline action evaluation
 
 The selected checkpoint is evaluated on all **5,621 validation observations**, using its saved split, instructions, normalization, and validation seed 0. Each observation predicts a 50-step chunk. End-of-episode padding is excluded, leaving **267,575 valid chunk timesteps**, including overlapping predictions of the same recorded trajectory timesteps.
 
-| Metric | Best-checkpoint evaluation |
-| --- | ---: |
-| Flow-matching loss | 0.264907 |
-| Aggregate action MSE, original joint scales | 161.216711 |
-| Aggregate action MAE, original joint scales | 8.578988 |
-| Checkpoint epoch index | 1, equivalent to 2 completed epochs |
+| Metric | Best-checkpoint evaluation | Last-checkpoint evaluation |
+| --- | ---: | --- |
+| Flow-matching loss | **0.264907** | 0.637668 |
+| Aggregate action MSE, original joint scales | 161.216711 | **111.169454** |
+| Aggregate action MAE, original joint scales | 8.578988 | **6.366987** |
+| Checkpoint epoch index | 2 completed epochs | 30 completed epochs |
 
-The standalone evaluation records flow loss **0.264907**; the training history records **0.264660** at selection. These are retained as separate measurements from the supplied artifacts. Action errors are computed after Euler sampling and denormalization, whereas flow loss measures velocity prediction in normalized space.
+### Key Finding: Lowest validation loss doesn't mean Overfitting
 
-| Joint | Action MAE ↓ | Action MSE ↓ | MAE unit |
-| --- | ---: | ---: | --- |
-| Shoulder pan | 6.1126 | 78.1199 | Degrees |
-| Shoulder lift | 10.0316 | 174.9502 | Degrees |
-| Elbow flex | 9.8836 | 172.0271 | Degrees |
-| Wrist flex | 12.8197 | 304.5410 | Degrees |
-| Wrist roll | 8.6364 | 182.7939 | Degrees |
-| Gripper | 3.9900 | 54.8682 | LeRobot gripper position scale |
+Validation flow-matching **loss reached its minimum after two epochs**
+(1,470 optimizer updates), then increased while training loss continued
+to decrease. This pattern is **consistent with overfitting** with respect
+to the measured flow-matching objective, but does not by itself establish
+deterioration in generated actions or closed-loop task performance.
 
-MSE uses the square of each joint's unit. The aggregate action metrics average arm and gripper errors on different scales, so they do not have a single physical unit. Per-joint results provide the more interpretable comparison. Wrist flex has the largest angular MAE in this evaluation; further rollout analysis is needed to determine how this affects reaching, grasping, and placement.
+##### Validation Loss != Hold-out Action Error
 
-Offline action errors measure imitation on recorded observations. They do not measure closed-loop recovery, motion initiation, or task completion.
+| Metric | Meaning |
+| --- | --- |
+| FLow-matching validation loss |  velocity-prediction error on noise-corrupted demonstration actions |
+| Hold-out action error | the discrepancy between demonstrated actions and action chunks
+generated |
 
 ## Real-robot evaluation
 
@@ -149,41 +128,6 @@ Offline action errors measure imitation on recorded observations. They do not me
     </td>
   </tr>
 </table>
-
-### Planned protocol
-
-Use the selected checkpoint and the same instruction, calibration, camera placement, and reset procedure as the recorded task. Define trial count, object/cup starting positions, time limit, and the motion-initiation threshold before collecting results. Evaluate every planned trial and record unsuccessful attempts as well as successes.
-
-A successful trial requires the robot to grasp the marker and release it into the cup within the declared time limit without human assistance. Report motion initiation, grasping, and placement separately so that an arm remaining near its reset pose is visible in the results.
-
-| Condition | Checkpoint | Trials | Motion initiation | Grasp success | Task success | Completion time, successful trials |
-| --- | --- | --- | --- | --- | --- | --- |
-| Nominal setup | Best | Pending | Pending | Pending | Pending | Pending |
-| Nominal setup | Final | Pending | Pending | Pending | Pending | Pending |
-| Varied marker starting positions | Best | Pending | Pending | Pending | Pending | Pending |
-
-Report each rate as `count / total trials (%)`; keep the denominator explicit. Add a confidence interval for task success and report the median completion time over successful trials. Record failures such as no initiation, missed grasp, dropped object, missed placement, timeout, or human intervention. The rollout CLI currently writes step counts and optional returns; success labels and videos must be recorded separately.
-
-## Usage
-
-See the **[English training guide](docs/training_guide/README.md)** for installation, demonstration recording, dataset format, a smoke test, training, TensorBoard, checkpoint selection, resume, fine-tuning, offline evaluation, and robot rollout.
-
-After installing dependencies, the common entry point is:
-
-```bash
-python -B -m smolvla_scratch.train_infer --help
-```
-
-To evaluate a local trained checkpoint:
-
-```bash
-python -B -m smolvla_scratch.train_infer --eval \
-  --dataset_dir data_recording/data/pick_place_smolvla_v1 \
-  --checkpoint outputs/pick_place_final/policy_best.ckpt \
-  --device auto
-```
-
-Dataset and checkpoint files must be supplied locally. The small experiment records linked above document the reported run; they do not include the model weights or demonstration videos.
 
 ## Implementation map
 
@@ -211,13 +155,3 @@ This project follows the SmolVLA design and adapts components from LeRobot for l
 - [SmolVLA: A Vision-Language-Action Model for Affordable and Efficient Robotics](https://arxiv.org/abs/2506.01844) — Shukor et al., 2025.
 - [Hugging Face LeRobot](https://github.com/huggingface/lerobot) — reference implementation and robot interfaces.
 - [SmolVLM2-500M-Video-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM2-500M-Video-Instruct) — pretrained visual-language backbone.
-
-<!--
-MAINTAINER NOTES
-1. Add images under docs/assets/ and replace each visible placeholder with its commented <img> element.
-2. Export the six distinct TensorBoard plots; only one learning-rate screenshot is needed.
-3. Keep optimizer update numbers visible and record the TensorBoard smoothing setting.
-4. Upload rollout videos to GitHub attachments or a video host, then replace VIDEO_URL and add thumbnails.
-5. Fill the robot results only after trials are complete. Include checkpoint, trial counts, and failure outcomes.
-6. The JSON files under docs/evaluation/pick_place_final/ are unchanged copies of the supplied run records.
--->
