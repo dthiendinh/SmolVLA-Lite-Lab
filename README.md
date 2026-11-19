@@ -17,6 +17,33 @@ This project connects dual-camera observations, a language instruction, and robo
   </tr>
 </table>
 
+### Data-preprocessing
+
+<table>
+  <tr>
+    <td align="center">
+      <strong>Model architecture</strong><br>
+      <img src="docs/model_architecture/data_preprocessing.png" alt="Data preprocessing architecture" width="100%">
+    </td>
+  </tr>
+</table>
+
+### Attention Engine
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <strong>Self-Attention</strong><br>
+      <img src="docs/model_architecture/self_attention.png" alt="self-attention" width="100%">
+    </td>
+    <td align="center" width="50%">
+      <strong>Cross-Attention</strong><br>
+      <img src="docs/model_architecture/cross_attention.png" alt="cross-attention" width="100%">
+    </td>
+  </tr>
+<table>
+
+
 Front and wrist images and the instruction provide visual-language context through a frozen, pretrained **SmolVLM2-500M-Video-Instruct** backbone. A trainable action expert uses this context, projected robot state, noisy actions, and a flow timestep to predict action velocities. At inference, Euler integration transforms Gaussian noise into an action chunk, which is denormalized into six robot joint targets.
 
 The reported configuration uses one observation timestep, a **50-step action chunk**, and **10 Euler steps**. State and action vectors contain six physical dimensions and are padded internally to 32 dimensions. Padding is excluded from the training objective.
