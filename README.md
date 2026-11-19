@@ -81,6 +81,22 @@ The reported configuration uses one observation timestep, a **50-step action chu
 
 This is a single-seed experiment. Validation episodes are used for checkpoint selection; they are not an independent test set. Exact recorded arguments, policy configuration, split membership, and normalization statistics are available in the [experiment configuration](docs/evaluation/pick_place_final/training_config.json).
 
+### Exampling data
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <strong>Front</strong><br>
+      <a href="docs/assets/data_examples/front.mp4"><img src="docs/assets/data_examples/front.jpg" alt="Watch from front aspect" width="100%"></a>
+    </td>
+    <td align="center" width="50%">
+      <strong>Wrist</strong><br>
+      <a href="docs/assets/data_examples/wrist.mp4"><img src="docs/assets/data_examples/wrist.jpg" alt="Watch from wrist aspect" width="100%"></a> 
+    </td>
+  </tr>
+</table>
+
+
 ### Offline action evaluation
 
 The selected checkpoint is evaluated on all **5,621 validation observations**, using its saved split, instructions, normalization, and validation seed 0. Each observation predicts a 50-step chunk. End-of-episode padding is excluded, leaving **267,575 valid chunk timesteps**, including overlapping predictions of the same recorded trajectory timesteps.
@@ -100,7 +116,7 @@ to decrease. This pattern is **consistent with overfitting** with respect
 to the measured flow-matching objective, but does not by itself establish
 deterioration in generated actions or closed-loop task performance.
 
-##### Validation Loss != Hold-out Action Error
+#### Validation Loss != Hold-out Action Error
 
 | Metric | Meaning |
 | --- | --- |
